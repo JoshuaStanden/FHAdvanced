@@ -152,3 +152,58 @@ page and grab the asset by hand.
 - NXP PN532 datasheet (Rev 3.6): https://www.nxp.com/docs/en/nxp/data-sheets/PN532_C1.pdf
 - NXP User Manual: https://www.nxp.com/docs/en/user-guide/141520.pdf
 - DIP-switch SPI-mode positions: set physically from board silkscreen (unconfirmed).
+
+---
+
+# ROUND 4 — Waveshare official docs read (2026-10-19 latest)
+
+Source: https://docs.waveshare.com/ESP32-S3-Touch-LCD-3.5 and its Resources /
+Working-with-ESP-IDF subpages. These RESOLVE several Round-3 unknowns.
+
+## Confirmed direct resource links (all live)
+- Demo source (ESP-IDF + Arduino): https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5
+- V1 schematic: https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5/ESP32-S3-Touch-LCD-3.5-Schematic.pdf
+- V2 schematic (Rev2.0): https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5/ESP32-S3-Touch-LCD-3.5_Rev2.0.pdf
+- 2D/3D + project doc: https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5/ESP32-S3-Touch-LCD-3.5-2Dand3D.zip
+- Chip datasheets (all on files.waveshare.com/wiki/common/): ST7796S, FT6336U,
+  AXP2101, PCF85063A, QMI8658C, ES8311.
+
+## Factory-demo (01_factory) native-ESP-IDF init order — MIRROR THIS on the hub
+  i2c_bus_init();
+  io_expander_init();                 // CH422G
+  esp_3inch5_display_port_init(&io_handle, &panel_handle, LCD_BUFFER_SIZE);  // ST7796 SPI
+  esp_3inch5_touch_port_init(&touch_handle, i2c_bus_handle, H_RES, V_RES, ROT); // FT6336 I2C
+  esp_axp2101_port_init(i2c_bus_handle);   // power mgmt
+  esp_es8311_port_init(i2c_bus_handle);    // audio codec
+  esp_qmi8658_port_init(i2c_bus_handle);   // IMU
+  esp_pcf85063_port_init(i2c_bus_handle);  // RTC (battery-backed — the time base)
+  esp_sdcard_port_init();                  // microSD
+  esp_camera_port_init(I2C_PORT_NUM);
+  esp_wifi_port_init(...);
+  esp_3inch5_brightness_port_init(); esp_3inch5_brightness_port_set(80);
+  lv_port_init();
+
+## Resolved unknowns
+- ST7796 LCD = SPI; FT6336 touch = I2C (touch is OFF the SPI bus — good).
+- RTC = PCF85063 (I2C) with backup-battery header → this IS the battery-backed
+  RTC the ARCHITECTURE time-sync design assumes. Confirmed real.
+- microSD has a dedicated esp_sdcard_port_init(); fh_pins.h notes SD on
+  GPIO9/10/11 SDMMC 1-bit → consistent with SDMMC, OFF the SPI bus (good case
+  for the radios). Confirm exact pins from the demo source/schematic.
+- Power mgmt = AXP2101 (the chip the earlier FootHoled AXP2101 lesson referenced).
+- Board brings out I2C/UART/USB + GPIOs on a 2.54mm header.
+
+## ⚠️ Two design-relevant flags
+1. ESP-IDF VERSION TENSION: Waveshare requires ESP-IDF **V5.5.0+** for this
+   board's examples (screenshots use 5.5.2). The demo port layer is a 5.5-era
+   codebase. Our target is 6.1 — it will LIKELY build but Waveshare does not
+   promise 6.1, and 6.0→6.1 had breaking changes. Expect possible small fixups
+   when building the Waveshare display/touch/SD/CH422G code on 6.1. (Does NOT
+   change the Option A decision; just budget a little porting on the hub.)
+2. BOARD REVISION V1 vs V2 — user must check the label on the back of the board.
+   V2 changes: TF-card insert/removal detection, reworked AXP2101 power,
+   battery reverse-protection + warning LED, "adjusted the RF circuit", PWR-button
+   pull-up, better EMC/ESD. SAME firmware on both, but pin against the MATCHING
+   schematic PDF (two different files above). The V2 "adjusted RF circuit" note
+   matters for a board we are bolting extra radios onto.
+- SKUs: 30733 (ESP32-S3-Touch-LCD-3.5), 30934 (…-C variant).
