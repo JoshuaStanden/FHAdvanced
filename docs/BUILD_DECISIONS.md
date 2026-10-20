@@ -172,3 +172,88 @@ check the module's ACK response at runtime — do not treat as hardware-validate
 - These three argue for Option A being cheaper than first thought: CH422G and the
   display/touch bring-up have a native-IDF reference (the factory demo itself),
   so going native on the hub is less from-scratch than it looked.
+
+---
+
+# ROUND 3 FINDINGS (2026-10-19 later still) — native-IDF driver feasibility
+
+Framework is now DECIDED = Option A (all native ESP-IDF 6.1). Round 3 checked
+whether each hub peripheral has a usable NATIVE component on IDF 6.1. One finding
+changes hub wiring/architecture; one REVERSES a Round-2 conclusion in our favor.
+
+## R3-A. ★ EXPANDER-CS PROBLEM — affects CC1101 AND PN532 (architecture-level)
+VERIFIED: native ESP-IDF `spi_master` AND RadioLib's native ESP-IDF HAL both
+assume the chip-select is a real GPIO driven by the SPI peripheral. Neither
+natively understands a CS toggled through an I2C I/O expander. But `fh_pins.h`
+puts the **CC1101 CS and PN532 CS on the CH422G expander** (only the nRF24 CSN is
+a native GPIO). So those two radios cannot use the stock auto-CS path.
+
+Two ways forward — a genuine HARDWARE-DESIGN decision, defer to bring-up if unsure:
+- KEEP wiring as-is: write a custom expander-CS transport that (1) asserts the
+  CH422G output, (2) runs the WHOLE SPI transaction with the bus LOCKED so no
+  other device interleaves, (3) de-asserts. Adds ms of I2C latency per
+  transaction. Workable but it is bespoke driver code = the flash-cycle-risky
+  path; PN532+expander-CS is ranked the HIGHEST-risk item in the whole project.
+- CHANGE wiring: move CC1101 CS and PN532 CS to NATIVE GPIOs (like nRF24 CSN
+  already is). RadioLib + the PN532 component then work as-designed. Costs native
+  GPIO budget — which fh_pins.h deliberately spent on the expander to conserve.
+RECOMMENDATION: if GPIO budget allows, move at least the PN532 CS (highest risk)
+to a native GPIO. Decide with the schematic in hand at bring-up.
+
+## R3-B. ✓ REVERSAL — native SPI PN532 components DO exist (Round 2 was wrong)
+Round 2 said no clean native-IDF PN532 SPI driver existed (only UART-only). FALSE
+as of now — three SPI-capable PN532 components are in the Espressif registry:
+- **jef-sure/pn532 v0.7.4** (BEST): SPI + I2C + UART, documents shared-bus use,
+  needs IDF >= 5.2. PN532 SPI facts it encodes: SPI Mode 0, LSB-first, 5 MHz max
+  (1 MHz default), whole-frame transaction, NSS-low-before-wake timing.
+- garag/esp-idf-pn532 v0.2.1 (SPI/I2C/HSU; less shared-bus docs).
+- victorobaro1/pn532-spi-idf v1.0.0 (S3-targeted, custom license).
+CONSEQUENCE: the PN532 DRIVER is NOT net-new work (use jef-sure/pn532). The only
+PN532 risk left is the expander-CS issue (R3-A), independent of the driver.
+PN532 SPI manual refs for any transport adaptation: NXP UM0701-02 §6.1.1.1,
+§6.2, §6.3.4, §7.2.11; AN10609.
+
+## R3-C. ✓ C5 5 GHz sniffing confirmed native on IDF 6.1
+`esp_wifi` on the C5 supports promiscuous mode, 802.11a/ac/ax, and
+`WIFI_BAND_MODE_5G_ONLY`. APIs: esp_wifi_set_band_mode(),
+esp_wifi_set_channel(primary, second), esp_wifi_set_promiscuous(true),
+esp_wifi_set_promiscuous_rx_cb(). C5 CANNOT do 2.4 + 5 GHz simultaneously (single
+radio, time-division) — 5 GHz-only avoids the band-switch limit; still hop across
+5 GHz channels and record the channel per capture.
+OPEN: the IDF-6.0 HE/secondary-channel reception quirk — could NOT confirm it is
+fixed in 6.1. BRING-UP PLAN: first test 5 GHz at 20 MHz, WIFI_SECOND_CHAN_NONE,
+verify HE reception, THEN try any secondary-channel config. set_channel after
+wifi start.
+
+## R3-D. Native building blocks CONFIRMED (no custom driver needed)
+- RadioLib native ESP-IDF HAL exists (src/hal/ESP-IDF/EspHal.h; selected via
+  RADIOLIB_BUILD_GENERIC + ESP_PLATFORM). Clean IDF 6.1 build NOT proven —
+  compile its HAL in a minimal 6.1 project before the full hub.
+- ST7796 LCD: espressif/esp_lcd_st7796 v1.5.0 (native, S3).
+- CH422G: espressif/ESP32_IO_Expander v1.1.1 (native, has CH422G, needs IDF>=5.1;
+  C++ API init/begin/pinMode/digitalWrite/multiDigitalWrite). 6.1 compat + the
+  exact CH422G constructor signature + the board I2C address NOT confirmed.
+- microSD: native SDMMC (esp_driver_sdmmc) AND SDSPI (esp_driver_sdspi) + FAT.
+
+## R3-E. Still UNCONFIRMED — all need the Waveshare schematic/source (your pull)
+- Is the microSD on SDMMC (OFF the SPI bus = good) or SDSPI (contends with the
+  3 radios)? Decides whether there is a 4-device SPI bus-arbitration problem.
+- Which SPI host (SPI2/SPI3) drives the ST7796 LCD vs the radio bus? S3 has
+  limited SPI hosts — do NOT freeze the bus layout until this is mapped.
+- FT6336 touch: exact native IDF component + board integration not confirmed.
+- CH422G 7-bit I2C address on this board.
+
+## R3-F. Native-IDF risk ranking → build sequence
+Lowest→highest risk: (1) C5 5 GHz sniffer → (2) microSD/CSV → (3) SX1262/RadioLib
+→ (4) CC1101+nRF24 shared bus → (5) ST7796+FT6336+CH422G bring-up →
+(6) PN532 + expander CS (HIGHEST). Build/bring-up in that order so the riskiest
+hardware round-trips happen only after the rest is proven. Per-target clean
+`idf.py set-target` project first; validate each subsystem in isolation before
+combining on the shared bus.
+
+## R3-G. Net effect on the plan
+- PN532 driver is NO LONGER a from-scratch port (R3-B) — good, lowers Option A cost.
+- BUT the expander-CS issue (R3-A) is the real remaining hub risk and may warrant
+  a small wiring change (PN532 CS → native GPIO). This is the one thing worth
+  deciding (or at least flagging) before the hub firmware is written.
+- C5 firmware is the safest place to start building when "go" is given.
