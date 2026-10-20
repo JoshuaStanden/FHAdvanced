@@ -1,51 +1,49 @@
 /*
- * fh_pins.h — FHAdvanced HUB pin map
- * Node: Waveshare ESP32-S3-Touch-LCD-3.5 (ST7796 LCD + FT6336 touch) — the HUB
+ * fh_pins.h — FHAdvanced HUB pin map  (REWRITTEN 2026-10-20)
+ * Node: Waveshare ESP32-S3-Touch-LCD-3.5 **V2** (ST7796 LCD + FT6336 touch).
  *
- * EXPERIMENTAL branch (FHAdvanced). Builds on top of the manually-applied
- * FootHoled-fixes work (reboot fix + reboot-logging). This header is the
- * single source of truth for the HUB's wired modules and its two UART links
- * to the daughterboards. See docs/ARCHITECTURE.md for the full three-chip
- * system design.
+ * ##########################################################################
+ * # THIS FILE WAS FULLY REWRITTEN after the hardware split was redesigned.  #
+ * # The hub NO LONGER carries any wired radios. All on-demand radios        #
+ * # (CC1101 / nRF24 / PN532 / SX1262 LoRa) moved to a dedicated ItsyBitsy   #
+ * # M0 node (see ../../firmware-itsybitsy/). The hub is now: BLE (internal  #
+ * # radio) + GPS + microSD + LCD/touch UI + the aggregator of 3 UART feeds. #
+ * #                                                                          #
+ * # The previous version of this file was INVALID: it used GPIO 32/33/23    #
+ * # (classic-ESP32 numbers that DO NOT EXIST on the ESP32-S3) and mapped    #
+ * # radio pins onto the LCD/USB/I2S. All of that is gone.                   #
+ * ##########################################################################
  *
- * THREE-CHIP SYSTEM (this file covers the Waveshare HUB only):
- *   - Waveshare = ESP32-S3-Touch-LCD-3.5 : UI + microSD + CC1101/nRF24/PN532
- *                 + BLE sniffing + sensor-stick orchestration + aggregation
- *   - XIAO-C5   = Seeed XIAO ESP32-C5    : 5 GHz Wi-Fi sniffing + GPS (own fw)
- *   - XIAO-S3   = Seeed XIAO ESP32-S3    : 2.4 GHz Wi-Fi sniffing (PRIORITY)
- *                 + Wio-SX1262 LoRa (lesser, best-effort) (own fw)
- * The two daughterboards stream capture records to the Waveshare over UART;
- * the Waveshare is the SINGLE writer to the microSD card. The XIAO-S3 is also
- * the system's LoRa gateway: the Waveshare relays sensor-stick LoRa traffic
- * through it over the bidirectional UART link.
- *
- * ---------------------------------------------------------------------------
- * HUB WIRED MODULES — ON THE SHARED SPI BUS
- *   - CC1101 sub-GHz transceiver (HW-863 / E07-433M20S)
- *   - nRF24L01+PA+LNA 2.4 GHz transceiver
- *   - PN532 V3 NFC (Elechouse, SPI mode — set the on-board DIP to SPI)
- *
- * All three share ONE SPI bus (SCLK/MOSI/MISO on native GPIO). Each device
- * gets its own chip-select. Slow control lines (most CS, reset, CE) are
- * pushed onto the CH422G I/O expander (EXIO*) over I2C to conserve native
- * GPIO. Interrupt lines and the timing-sensitive nRF chip-select stay on
- * native GPIO so they are fast and can trigger real ISRs.
- *
- * DESIGN NOTE — nRF24 CSN is deliberately on a NATIVE GPIO (GPIO15), not on
- * the expander. CS over I2C means every SPI transaction first writes the
- * expander over I2C to toggle CS, adding latency. The nRF24 is the only one
- * of the three pushed at high packet rates, so it gets a real GPIO. CC1101
- * and PN532 CS over the expander is fine for their duty cycles.
+ * FOUR-NODE SYSTEM (this file covers the Waveshare HUB only):
+ *   - Waveshare S3 (HUB) : BLE sniff + GPS + microSD + UI + aggregate 3 feeds
+ *   - XIAO-C5            : 5 GHz Wi-Fi sniff (continuous)           — own fw
+ *   - XIAO-S3            : 2.4 GHz Wi-Fi sniff (continuous)         — own fw
+ *   - ItsyBitsy M0       : CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)
+ *                          — Arduino/SAMD fw, see firmware-itsybitsy/
+ * All three satellite nodes stream to the hub over UART using the shared
+ * fh_protocol frame format (../../components/fh_protocol/). The hub is the
+ * SINGLE writer to the microSD card.
  *
  * ---------------------------------------------------------------------------
- * HUB HEADER PINS CONSUMED (verified against the Waveshare 32-pin header):
- *   Native GPIO : 18, 23, 19 (SPI) + 2, 4, 17 (IRQs) + 15 (nRF CSN) = 7
- *   UART (XS3)  : TXD/RXD (header pins 25/27) — hardware UART to XIAO-S3 link
- *   UART (C5)   : GPIO32/33 (header pins 14/12) — 2nd UART, remapped, C5 link
- *   I2C         : SCL/SDA (shared — RTC + touch + CH422G already live here)
- *   Expander    : EXIO3, EXIO5, EXIO6, EXIO7 (4 of 5 broken-out EXIO lines)
- *   SPARE       : GPIO0 (STRAPPING — do not use), GPIO26 (verify vs PSRAM),
- *                 EXIO4 (free)
+ * AUTHORITATIVE V2 PIN FACTS (from the Waveshare pinout + J8 header diagram):
+ *   ONBOARD, RESERVED — never repurpose:
+ *     IO1  LCD MOSI   IO3 LCD DC    IO5 LCD SCLK   IO6 LCD BL   (SPI2_HOST)
+ *     IO2  LCD MISO   IO4 EXIO_INT (TCA9554 expander irq)
+ *     IO7  I2C SCL    IO8 I2C SDA   (shared: touch/RTC/IMU/AXP2101/codec/expander)
+ *     IO9  SD D0      IO10 SD CMD   IO11 SD CLK   (SDMMC 1-bit)
+ *     IO12-16 I2S audio (ES8311)    IO19/20 USB D-/D+
+ *     IO43/44 UART0 console TXD/RXD (kept as console; see note)
+ *   TCA9554 expander EXIO0..7 all used by onboard functions.
+ *   microSD is SDMMC (OFF the SPI bus). FT6336 touch is on I2C (OFF SPI).
+ *
+ * J8 2x16 HEADER — pins genuinely FREE for our use (camera NOT populated):
+ *   IO17, IO18, IO21, IO38, IO39, IO40, IO42, IO45, IO46, IO47, IO48  (11)
+ *   + IO0 (STRAPPING — boot-safe use only)  + IO43/IO44 (console).
+ *   (These 11 are the camera data/clock pins; the camera is omitted on this
+ *    build, so they are free. Verified against the J8 diagram.)
+ *
+ * HUB DEMAND NOW = FOUR UART links = 8 pins. 8 of 11 free -> ~3 spare. No
+ * strapping pin, no SD-bus sharing, no expander needed. Comfortable fit.
  * ---------------------------------------------------------------------------
  */
 
@@ -53,89 +51,79 @@
 
 #include <stdint.h>
 
-// ===========================================================================
-// Shared SPI bus (native GPIO — fast)
-// ===========================================================================
-#define FH_SPI_SCLK        18   // header pin 9
-#define FH_SPI_MOSI        23   // header pin 11
-#define FH_SPI_MISO        19   // header pin 13
+/* ===========================================================================
+ * UART LINK A — XIAO-C5  (5 GHz Wi-Fi capture; receive-mostly into the hub)
+ * Hub TX -> C5 RX (control/time), C5 TX -> hub RX (capture records).
+ * ======================================================================== */
+#define FH_UART_C5_TX        17   // J8 pin 15 (IO17) — HUB -> C5
+#define FH_UART_C5_RX        18   // J8 pin 17 (IO18) — C5  -> HUB
 
-// ===========================================================================
-// Native-GPIO interrupt lines (must be real, fast GPIO for ISRs)
-// ===========================================================================
-#define FH_CC1101_GDO0      2   // header pin 5  — CC1101 packet-ready IRQ
-#define FH_NRF24_IRQ        4   // header pin 7  — nRF24 RX/TX/MAX_RT IRQ
-#define FH_PN532_IRQ       17   // header pin 17 — PN532 card-present IRQ
+/* ===========================================================================
+ * UART LINK B — XIAO-S3  (2.4 GHz Wi-Fi capture; receive-mostly into the hub)
+ * ======================================================================== */
+#define FH_UART_XS3_TX       21   // J8 pin 6  (IO21) — HUB -> XS3
+#define FH_UART_XS3_RX       38   // J8 pin 8  (IO38) — XS3 -> HUB
 
-// ===========================================================================
-// nRF24 chip-select — NATIVE GPIO on purpose (see DESIGN NOTE above)
-// ===========================================================================
-#define FH_NRF24_CSN       15   // header pin 15 — fast CS for high packet rate
+/* ===========================================================================
+ * UART LINK C — ItsyBitsy M0  (on-demand radio node; BIDIRECTIONAL)
+ * Hub sends prompts (do sub-GHz burst / NFC read / LoRa relay TX) and the
+ * ItsyBitsy returns results + LoRa relay RX. See the command set in
+ * ../../components/fh_protocol/ (fh_ondemand.h).
+ * ======================================================================== */
+#define FH_UART_ITSY_TX      39   // J8 pin 10 (IO39) — HUB -> ItsyBitsy (prompts)
+#define FH_UART_ITSY_RX      40   // J8 pin 12 (IO40) — ItsyBitsy -> HUB (results)
 
-// ===========================================================================
-// UART links to the daughterboards (HUB receives capture records on both)
-// The HUB is the single SD writer; both links feed the same recon_log path.
-// ===========================================================================
-// Link A — XIAO ESP32-S3 (BLE + SX1262 LoRa). Uses the board's hardware UART.
-#define FH_UART_XS3_TX     43   // header pin 25 (TXD) — HUB -> XS3 (cmd/ctrl)
-#define FH_UART_XS3_RX     44   // header pin 27 (RXD) — XS3 -> HUB (records)
-// NOTE: 43/44 are the ESP32-S3 default UART0 TXD/RXD pins that Waveshare
-// routes to the header TXD/RXD. Keep the console on USB-CDC so it does not
-// fight this link; assign the GPS/record UART to a dedicated UART controller.
+/* ===========================================================================
+ * UART LINK D — GPS (GY-NEO6MV2 / u-blox NEO-6M), RECEIVE-ONLY in practice.
+ * NMEA in; hub also TX's UBX-CFG-RATE/CFG-PRT at boot to attempt 5 Hz (falls
+ * back to 1 Hz). Re-sent every boot (clone does not persist config). The hub
+ * caches last-known-fix and stamps it onto every record for geotagging.
+ * ======================================================================== */
+#define FH_UART_GPS_TX       42   // J8 pin 14 (IO42) — HUB -> GPS (config only)
+#define FH_UART_GPS_RX       45   // J8 pin 16 (IO45) — GPS -> HUB (NMEA)
 
-// Link B — XIAO ESP32-C5 (Wi-Fi 2.4/5 capture + GPS). 2nd UART, remapped via
-// the GPIO matrix onto two free right-column header GPIOs.
-#define FH_UART_C5_TX      33   // header pin 12 (GPIO33) — HUB -> C5 (cmd/ctrl)
-#define FH_UART_C5_RX      32   // header pin 14 (GPIO32) — C5 -> HUB (records)
-// GPIO32/33 are broken out on the Waveshare header and are not strapping pins.
-// Chosen over GPIO26 (header pin 10) because 26 may be tied to the R8 PSRAM —
-// verify 26 against the schematic before ever repurposing it.
+/* ===========================================================================
+ * SPARE free header GPIO (available for future use / status LED / etc.)
+ * ======================================================================== */
+// IO46 (J8 pin 18), IO47 (J8 pin 20), IO48 (J8 pin 22) — 3 spare.
+// IO0  (J8 pin 19) — STRAPPING pin; boot-safe output only if ever needed.
 
-// ===========================================================================
-// CH422G I/O expander lines (EXIO*) — slow control signals over I2C
-// Index values are the expander channel numbers as broken out on the header.
-// Drive these through your CH422G/IO-expander helper, NOT gpio_set_level().
-// ===========================================================================
-#define FH_EXIO_CC1101_CS   3   // EXIO3 — CC1101 chip-select
-#define FH_EXIO_PN532_CS    5   // EXIO5 — PN532 chip-select (SS)
-#define FH_EXIO_NRF24_CE    6   // EXIO6 — nRF24 CE (RX/TX mode, not CS)
-#define FH_EXIO_PN532_RST   7   // EXIO7 — PN532 RSTPDN (reset / power-down)
-// EXIO4 is intentionally left SPARE for a future module.
+/* ===========================================================================
+ * UART CONTROLLER ASSIGNMENT (ESP32-S3 has UART0/1/2; use the GPIO matrix to
+ * route any of the above pins to a controller). Suggested:
+ *   UART0 = USB-CDC console (keep IO43/44 free of our links, OR move console
+ *           fully to USB-Serial-JTAG and reuse 43/44 as a 5th UART if ever
+ *           needed). With 4 links we do NOT need 43/44, so the console stays.
+ *   The four data links share UART1/UART2 via time-multiplex OR use the S3's
+ *   LP/HP UARTs; at 2 Mbaud the capture links need real HW UARTs. If only 3 HW
+ *   UARTs exist, the GPS (slow, 9600–38400) can go on a software/LP UART since
+ *   it is low-rate, freeing the fast HW UARTs for the 2 Mbaud capture links.
+ * NOTE: finalize controller-to-pin routing in firmware init; the GPIO matrix
+ * makes any pin above usable by any UART controller.
+ * ======================================================================== */
 
-// ===========================================================================
-// Optional second CC1101 interrupt (GDO2). Leave undefined unless wired.
-// If you free another native GPIO, define it here.
-// ===========================================================================
-// #define FH_CC1101_GDO2   -1
+/* ===========================================================================
+ * RESERVED / DO NOT REPURPOSE (onboard V2 functions)
+ *   IO1/2/3/5/6  — LCD (ST7796) on SPI2_HOST + DC + backlight
+ *   IO4          — TCA9554 expander interrupt
+ *   IO7/8        — I2C0 (touch, PCF85063 RTC, QMI8658 IMU, AXP2101, ES8311,
+ *                  TCA9554 expander)
+ *   IO9/10/11    — microSD (SDMMC 1-bit)
+ *   IO12-16      — I2S audio (ES8311 codec)
+ *   IO19/20      — USB D-/D+
+ *   IO43/44      — UART0 console (left as console)
+ *   GPS/time base: battery-backed PCF85063 RTC on I2C, set from GPS UTC.
+ * ======================================================================== */
 
-// ===========================================================================
-// RESERVED / DO NOT REPURPOSE
-//   GPIO0  — strapping pin (boot mode); on the header but unsafe for I/O
-//   GPIO13 — USB D-  (DN)
-//   GPIO14 — USB D+  (DP)
-//   GPIO9/10/11 — microSD (SDMMC 1-bit: CLK/CMD/D0) from recon_log.cpp
-//   GPIO7/8 — I2C0 SCL/SDA (RTC + touch + CH422G expander)
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// HARDWARE CAVEATS (read before bring-up)
-//
-// 1. nRF24L01+PA+LNA POWER: the PA/LNA variant draws large current spikes on
-//    TX. The board's 3V3 rail may brown out and drop packets. Use a dedicated
-//    3.3V supply or an adapter with a bulk decoupling cap (AMS1117 socket
-//    board). This is a POWER issue, not a GPIO one — but it WILL bite bring-up.
-//
-// 2. CS-over-I2C latency: CC1101 and PN532 toggle CS via the CH422G, so each
-//    transaction pays an I2C write first. Fine at their rates. If you ever add
-//    a second fast SPI device, move its CS to native GPIO like the nRF24.
-//
-// 3. HUB right-column GPIO26/32/33: CONFIRMED broken out as usable GPIO on the
-//    Waveshare ESP32-S3-Touch-LCD-3.5 header (pins 10/14/12). GPIO32/33 are
-//    used above for the C5 UART link. GPIO26 is left spare but should be
-//    checked against the schematic — on some ESP32-S3 R8 modules GPIO26 is
-//    tied to the octal/quad PSRAM. Prefer 32/33 (known clean) for I/O.
-//
-// 4. nRF24+PA+LNA (2.4 GHz) and the XS3-side SX1262 (sub-GHz) are both TX
-//    brown-out risks. Keep each on a well-decoupled supply — do NOT run all
-//    the radios off one marginal 3V3 regulator.
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+ * HARDWARE NOTES (bring-up)
+ * 1. Link baud: the C5 and S3 capture links run at 2 Mbaud (dedup'd binary
+ *    frames). The ItsyBitsy link is low-rate (occasional prompts/results) and
+ *    can run slower. The GPS link is 9600 (default) up to 38400 (5 Hz attempt).
+ * 2. Console: keep on USB-CDC / USB-Serial-JTAG so it never fights the links.
+ * 3. All these pins were the camera's on a camera-populated board; this build
+ *    omits the camera, which is what frees them. If a camera is ever added,
+ *    this pin map must change (camera + 4 UARTs do NOT both fit on J8).
+ * 4. Verify each pin against YOUR board at bring-up with a continuity/boot test
+ *    before trusting it — the J8 diagram is authoritative but belt-and-suspenders.
+ * --------------------------------------------------------------------------- */
