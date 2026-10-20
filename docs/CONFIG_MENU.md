@@ -1,19 +1,3 @@
-<!-- ========================================================================
-  ⚠️  MOSTLY VALID — two post-redesign notes (updated 2026-10-20)
-  ========================================================================
-  The config model, dedup model, storage/CSV rules and maintenance actions below
-  are all STILL AUTHORITATIVE. The 2026-10-20 four-node redesign changes only a
-  couple of node-location details referenced here:
-   • The function/EVENT radios (CC1101, nRF24, PN532) are now on the ItsyBitsy M0
-     on-demand node, NOT the Waveshare hub. Their config/record handling is the
-     same; only the hosting node changed.
-   • Setting #5 "GPS fix rate (1 / 5 / 10 Hz)": the module in hand is a NEO-6M
-     (GY-NEO6MV2) which MAXES AT 5 Hz — the "10 Hz" option is unsupported on this
-     hardware and should be clamped out. Default 5 Hz attempted, 1 Hz fallback.
-     GPS now lives on the HUB (not the XIAO-C5).
-  See docs/FIRMWARE_BRIEF.md + docs/OPEN_DECISIONS.md for the current design.
-  ======================================================================== -->
-
 # FHAdvanced — Config Menu (decided)
 
 Companion to `ARCHITECTURE.md` (#6 UI + #9 config). This WAS a candidate list to
@@ -50,7 +34,12 @@ and **CONSTANT** (compiled-in, not user-reachable).
        re-logs as a fresh sighting once quiet / lingering past N seconds; or
    (b) "Per session (log each device once)" — one row per device for the whole
        session, never re-logs until reboot (infinite eviction). Default = (a)/60s.
-5. **GPS fix rate (1 / 5 / 10 Hz)** — default 5 Hz.
+5. **GPS fix rate** — default 5 Hz (attempted). HARDWARE NOTE: the module in
+   hand is a GY-NEO6MV2 (u-blox NEO-6M) which MAXES AT 5 Hz, so the menu offers
+   **1 / 5 Hz only** — the old "10 Hz" option is clamped out (NEO-M8/M10
+   territory). Firmware attempts 5 Hz + raised baud at boot and falls back to
+   1 Hz if the module does not take it (re-applied every boot; the clone does
+   not persist config). GPS is wired to the HUB (not a daughterboard).
 6. **Display** — brightness + sleep timeout:
    - Brightness: user scale 0–100% mapped to a HARDWARE CEILING of 85% (we never
      drive the backlight past 85%; the user still sees "100%"). Default **50%**.
@@ -120,11 +109,13 @@ Safe Battery Swap, Config status view) — see below.
     lon, time, extra`).
   - **Function/EVENT radios (CC1101, nRF24, PN532/NFC)** — NOT continuous; each
     is a deliberate action (sub-GHz burst, 2.4 GHz probe, NFC read) whose RESULT
-    is recorded as an event. Their meaningful fields differ per function (an NFC
-    read has tag UID/type; a sub-GHz burst has freq + payload snippet) and do
-    not fit the Wi-Fi schema cleanly. NOT user-configurable — per-function
-    record formats are TBD, to define WHEN those features are built. Same CSV
-    file is fine; the row shape differs by function.
+    is recorded as an event. These live on the **ItsyBitsy M0 on-demand node**
+    (prompted by the hub over UART; see `fh_ondemand.h`), not the hub. Their
+    meaningful fields differ per function (an NFC read has tag UID/type; a
+    sub-GHz burst has freq + payload snippet) and do not fit the Wi-Fi schema
+    cleanly. NOT user-configurable — per-function record formats are TBD, to
+    define WHEN those features are built. Same CSV file is fine; row shape
+    differs by function.
 
 ### Hardware provenance + time base (DECIDED 2026-10-19)
 - **eFuse MAC = hardware provenance.** Every ESP32 (S3 / C5) has a factory-burned,

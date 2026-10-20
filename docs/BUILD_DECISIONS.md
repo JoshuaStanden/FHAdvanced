@@ -2,7 +2,7 @@
 
 Decisions made while reviewing the design package + the external resource
 research, BEFORE firmware was written. This file + `RESOURCES_FOUND.md` are what
-a build session reads AFTER `BUILD_HANDOFF.md` to know the framework path, the
+a build session reads AFTER `FIRMWARE_BRIEF.md` to know the framework path, the
 GPS plan, and where the project lives. Where a decision DEVIATES from the design
 docs, that is called out explicitly.
 
@@ -64,7 +64,7 @@ this module. Record the ACHIEVED rate so the log is honest about what ran.
 - **Adafruit-PN532 v1.3.4** — PN532 NFC on SPI (hub).
 - **TinyGPS++ (stable tag, not the 1.1-beta)** — NMEA parse for the NEO-6M (C5).
 
-## 4. Build order (unchanged from BUILD_HANDOFF.md)
+## 4. Build order (unchanged from FIRMWARE_BRIEF.md)
 1. `components/fh_protocol/` — shared frame (SYNC/TYPE/LEN/CRC16, packed structs,
    encode/decode/resync). Built first so the wire format cannot drift.
 2. Hub firmware (`firmware/`) — most specified; `fh_pins.h` already exists.
@@ -73,7 +73,7 @@ this module. Record the ACHIEVED rate so the log is honest about what ran.
 4. XIAO-S3 firmware (`firmware-xs3/`) — 2.4 GHz sniff (priority) + SX1262 LoRa
    (best-effort, dual-core split). Pin map from the captured S3 numbers.
 
-## 5. Parked items (leave as explicit TODO stubs — per BUILD_HANDOFF.md)
+## 5. Parked items (leave as explicit TODO stubs — per FIRMWARE_BRIEF.md)
 - Daughterboard pin maps: now get REAL GPIO numbers from the Seeed pinouts, but
   flagged "verify against physical board."
 - Per-source `extra` payload contents in the CAPTURE record — TBD at bring-up.
@@ -86,7 +86,7 @@ NOT yet committed to a repo. NOTE the FootHoled repo situation is messy — the
 FootHoledJoshin local clone is an orphan pointing at a deleted remote. If this
 goes into a repo, the target repo/branch must be named explicitly.
 
-## 7. Honest expectation (unchanged, from BUILD_HANDOFF.md)
+## 7. Honest expectation (unchanged, from FIRMWARE_BRIEF.md)
 Firmware from these docs is DESIGN-FAITHFUL but UNVERIFIED — no ESP-IDF toolchain
 on this machine, so it cannot be compiled/flashed here. First real compile is on
 hardware. Self-audit before handoff for this codebase's known compile traps:

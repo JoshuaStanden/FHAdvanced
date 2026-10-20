@@ -12,9 +12,9 @@ one geotagged CSV on a single microSD.
 > `itsybitsy-ondemand` branch.
 
 ## 👉 Building firmware? START AT `docs/FIRMWARE_BRIEF.md`
-It is the single current, authoritative starting point. (The older
-`docs/BUILD_HANDOFF.md` and `docs/ARCHITECTURE.md` describe a PRE-redesign
-3-node layout and carry SUPERSEDED banners — read the brief instead.)
+It is the single current, authoritative starting point. `docs/ARCHITECTURE.md`
+is the full system design (updated to the four-node layout); `docs/OPEN_DECISIONS.md`
+has the decision trail.
 
 ## Node split (final, pin-verified 2026-10-20)
 | Node | Chip | Role | Firmware |
@@ -33,10 +33,10 @@ No camera (its J8 header pins are the hub's 4 UART links). No I/O expander neede
 - **`docs/RESOURCES_FOUND.md`** — research findings (links, exact values, pin facts).
 - **`docs/research-raw/`** — raw ChatGPT research (primary source).
 - **`docs/hardware/`** — pinout images (Waveshare matrix, J8 header, ItsyBitsy).
-- **`docs/ARCHITECTURE.md`**, **`docs/CONFIG_MENU.md`**, **`docs/BUILD_HANDOFF.md`**,
-  **`README_ORIGINAL.md`** — ORIGINAL design docs; still valid for system
-  behaviour / dedup / CSV / failure model, but carry SUPERSEDED banners for the
-  node-location details the redesign changed.
+- **`docs/ARCHITECTURE.md`** — authoritative system design (four-node): node
+  roles, UART frame format, dedup model, SD/CSV schema, failure taxonomy,
+  DEF CON data-path, config + UI requirements. **`docs/CONFIG_MENU.md`** —
+  authoritative config spec (6 settings + 4 maintenance actions). Both current.
 
 ## Code already written (scaffolding; UNVERIFIED until built on hardware)
 - `components/fh_protocol/` — shared UART wire format (`fh_frame.h/.c` + host test).

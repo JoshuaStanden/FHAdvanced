@@ -26,7 +26,7 @@ sensor stick. One geotagged CSV on one microSD, written by the hub.
 No camera (dropped — its pins are the hub's 4 UART links). No I/O expander needed.
 
 ## Where everything durable lives (repo: JoshuaStanden/FHAdvanced, branch itsybitsy-ondemand)
-- **Design (authoritative):** docs/ARCHITECTURE.md, docs/CONFIG_MENU.md, docs/BUILD_HANDOFF.md
+- **Design (authoritative):** docs/ARCHITECTURE.md, docs/CONFIG_MENU.md
 - **Decisions:** docs/BUILD_DECISIONS.md, docs/OPEN_DECISIONS.md (read the RESOLVED banner at its top)
 - **Research distilled:** docs/RESOURCES_FOUND.md (Rounds 1–8)
 - **Research raw (primary source):** docs/research-raw/round1..3*.md

@@ -1,53 +1,15 @@
-<!-- ========================================================================
-  ⚠️  SUPERSEDED IN PART — READ THIS FIRST (updated 2026-10-20)
-  ========================================================================
-  This document describes the ORIGINAL THREE-node design. On 2026-10-20 the
-  HARDWARE SPLIT WAS REDESIGNED to FOUR nodes. The system behaviour, wire
-  protocol, dedup model, CSV schema, failure taxonomy, DEF CON data-path
-  reasoning, config model and UI requirements below are ALL STILL VALID and
-  authoritative. BUT every statement about WHICH NODE hosts WHICH radio is now
-  OUTDATED. The authoritative current design is docs/FIRMWARE_BRIEF.md +
-  docs/OPEN_DECISIONS.md (read the RESOLVED banner at its top).
-
-  WHAT CHANGED (old doc  →  current design):
-   • THREE nodes  →  FOUR nodes (added an Adafruit ItsyBitsy M0 Express).
-   • Waveshare hub hosted CC1101 / nRF24 / PN532  →  the hub hosts NO wired
-     radios. All three moved to the ItsyBitsy.
-   • XIAO-S3 = 2.4 GHz + SX1262 LoRa gateway  →  XIAO-S3 = 2.4 GHz Wi-Fi ONLY.
-     The SX1262 LoRa moved to the ItsyBitsy (all on-demand radios live there).
-   • XIAO-C5 = 5 GHz + GPS  →  XIAO-C5 = 5 GHz Wi-Fi ONLY. GPS moved to the hub.
-   • "All THREE firmwares are ESP-IDF"  →  the 3 ESP32 nodes are ESP-IDF 6.1;
-     the ItsyBitsy is Arduino/SAMD. FOUR firmwares.
-   • SX1262 "7 host pins, ANT_SW on-module via DIO2, no host pin"  →  WRONG for
-     the Wio-SX1262-for-XIAO board: it needs a host RF_SW1 pin = 8 host pins.
-   • "Verification summary: LoRa on Waveshare? NO" still holds, but LoRa is now
-     on the ItsyBitsy, not the XIAO-S3.
-   • The camera was dropped (its J8 pins are the hub's 4 UART links: C5, S3,
-     ItsyBitsy, GPS).
-   • fh_pins.h was fully REWRITTEN (the old GPIO 32/33/23 were classic-ESP32
-     pins that do not exist on the S3). See firmware/src/fh_pins.h.
-
-  RESULT — current node roles:
-     XIAO-C5    : 5 GHz Wi-Fi (continuous)
-     XIAO-S3    : 2.4 GHz Wi-Fi (continuous)
-     Hub (WS)   : BLE (continuous) + GPS + microSD + UI + aggregate 4 UART feeds
-     ItsyBitsy  : CC1101 + nRF24 + PN532 + SX1262 LoRa (all on-demand)
-
-  The on-demand command set (hub↔ItsyBitsy) is components/fh_protocol/include/
-  fh_ondemand.h. Everything below is kept for its still-valid system design.
-  ======================================================================== -->
-
-# FHAdvanced — Architecture Notes (locked three-node design)
+# FHAdvanced — Architecture Notes (locked four-node design)
 
 Experimental branch of FootHoled. Builds on top of the manually-applied
 FootHoled-fixes work (reboot fix + reboot-logging).
 
-Status: three-node HARDWARE TOPOLOGY locked + verified against real pinouts
-(2026-10-19). System-level design (power, failure modes, config, UI, antenna)
-is captured in the status tracker near the end — several items DECIDED but not
-yet built, and #6 (UI) deferred. Nothing built or flashed yet. Waveshare pin
-assignments live in `firmware/src/fh_pins.h`; this file is the system-level
-design, data-flow, and SD-schema contract.
+Status: four-node HARDWARE TOPOLOGY locked + pin-verified (2026-10-20). Nothing
+flashed yet. Waveshare hub pin map lives in `firmware/src/fh_pins.h`; the
+ItsyBitsy pin map in `firmware-itsybitsy/fh_itsy_pins.h`; the hub↔ItsyBitsy
+on-demand command set in `components/fh_protocol/include/fh_ondemand.h`. This
+file is the system-level design, data-flow, and SD-schema contract. For the
+build starting point see `FIRMWARE_BRIEF.md`; for the decision trail see
+`OPEN_DECISIONS.md` and `BUILD_DECISIONS.md`.
 
 ---
 
@@ -55,115 +17,94 @@ design, data-flow, and SD-schema contract.
 
 | Name | Board | Role |
 |---|---|---|
-| **Waveshare** | ESP32-S3-Touch-LCD-3.5 (mainboard) | UI, SD, wired radios, BLE, orchestration |
-| **XIAO-C5** | Seeed XIAO ESP32-C5 (daughterboard) | 5 GHz Wi-Fi sniffing + GPS |
-| **XIAO-S3** | Seeed XIAO ESP32-S3 (daughterboard) | 2.4 GHz Wi-Fi sniffing + LoRa |
+| **Waveshare** | ESP32-S3-Touch-LCD-3.5 V2 (mainboard) | UI, SD, BLE sniff, GPS, orchestration, aggregation |
+| **XIAO-C5** | Seeed XIAO ESP32-C5 (daughterboard) | 5 GHz Wi-Fi sniffing (continuous) |
+| **XIAO-S3** | Seeed XIAO ESP32-S3 (daughterboard) | 2.4 GHz Wi-Fi sniffing (continuous) |
+| **ItsyBitsy** | Adafruit ItsyBitsy M0 Express (SAMD21) | On-demand radios: CC1101 + nRF24 + PN532 + SX1262 LoRa |
+
+Four nodes. The three ESP32s build with ESP-IDF 6.1; the ItsyBitsy builds with
+Arduino/SAMD (it is the one non-ESP-IDF node). All four exchange `fh_protocol`
+frames over UART with the hub.
 
 ---
 
 ## Division of labor (locked)
 
 ### Waveshare — mainboard / orchestrator
-Handles each of its radio tasks ONE AT A TIME (by design — the use case never
-needs two of these Waveshare radios active simultaneously):
+- **BLE sniffing** — continuous, on the Waveshare's own internal 2.4 GHz radio.
+- **GPS** — the GY-NEO6MV2 (u-blox NEO-6M) is wired to the hub over UART. The
+  hub caches last-known-fix and stamps it onto every record (geotagging the
+  whole log). NEO-6M: attempt 5 Hz + raised baud at boot, fall back to 1 Hz
+  (re-sent every boot; the clone does not persist config). Max nav rate 5 Hz.
+- **microSD** — the SINGLE log writer for the whole system.
+- **3.5" LCD + touch UI**.
+- **Sensor-stick orchestration** — decides BLE-vs-LoRa transport (see below).
+- **Aggregates FOUR UART feeds** (XIAO-C5, XIAO-S3, ItsyBitsy, GPS) into one log.
+- Hosts NO wired radios itself (they live on the ItsyBitsy).
+
+### ItsyBitsy M0 — on-demand / function-event radio node
+Hosts every NON-continuous radio, driven ONE AT A TIME (single-core), prompted
+by the hub over UART (command set: `fh_ondemand.h`):
 - CC1101 (SPI) — sub-GHz raw/OOK-ASK
 - nRF24L01+PA+LNA (SPI) — 2.4 GHz transceiver
 - PN532 V3 (SPI) — NFC
-- **BLE sniffing** — on the Waveshare's own internal 2.4 GHz radio
-- **Sensor-stick communication** — dual-transport (see below)
-- microSD — the SINGLE log writer for the whole system
-- 3.5" LCD + touch UI
-- Aggregates both daughterboard UART feeds into one log
+- **SX1262 LoRa (SPI)** — the promptable sensor-stick LoRa link (= system LoRa
+  gateway). All four share one SPI bus with per-radio chip-selects.
+Because none of these is a continuous capture stream, serializing them on a
+single core is acceptable (a long LoRa TX briefly blocks the other on-demand
+radios — fine by design).
 
-### XIAO-C5 — dedicated 5 GHz + geo/time
+### XIAO-C5 — dedicated 5 GHz
 - **5 GHz Wi-Fi sniffing, continuous** — its sole radio job. Being 5 GHz-only
   sidesteps the C5's single-band-at-a-time limit entirely (it never touches
-  2.4 GHz, so no band-hopping compromise).
-- **GPS, continuous** — provides position + GPS time; geotags its own 5 GHz
-  captures at the source and periodically pushes its fix to the Waveshare so
-  every other record can be geotagged too.
+  2.4 GHz, so no band-hopping compromise). GPS is NO LONGER on the C5 (moved to
+  the hub); the C5 is a pure 5 GHz sniffer.
 
-**GPS fix rate + geotag strategy (every capture gets a location):**
-Two independent mechanisms; use both.
-- CACHE LAST-KNOWN FIX (always, free): captures arrive far faster than GPS
-  updates (hundreds of frames/sec vs a few fixes/sec), so NEVER gate a capture
-  on a fresh fix. Keep the most recent fix in memory and stamp it onto every
-  capture as it is recorded. Zero extra GPS/CPU/RF cost. This alone geotags
-  every signal.
-- TARGET 5 Hz GPS (for the vehicle case): default consumer modules run 1 Hz;
-  configure the module to 5 Hz at startup. Rationale — how far you move
-  between fixes vs the ~2.5-3 m GPS error floor:
-    walking ~1.4 m/s  -> 1 Hz already < GPS error (0.28 m @ 5 Hz)
-    running ~5 m/s     -> ~1 m per fix @ 5 Hz
-    30 mph  ~13 m/s    -> 2.6 m per fix @ 5 Hz (vs 13 m @ 1 Hz)
-    65 mph  ~30 m/s    -> 6 m per fix @ 5 Hz
-  Walking/running are already covered at 1 Hz (movement < GPS error); 5 Hz is
-  really about keeping the DRIVING case under the GPS error floor. 5 Hz is the
-  sweet spot over 10 Hz: adequate for vehicle speed without the UART/parse
-  overhead.
-- REQUIRED CONFIG: 5 Hz NMEA will NOT fit 9600 baud — raise the GPS UART to
-  38400 or 115200 baud. Parsing 5 fixes/sec is still trivial for the C5 and
-  does not affect 5 GHz sniffing.
-- HONEST LIMIT: the geotag is "position at the most recent fix," not at the
-  exact instant of capture. Worst-case staleness at 5 Hz is 0.2 s
-  (sub-meter walking, ~1 m running, ~2.6 m @ 30 mph) — at or below the GPS
-  hardware error floor, so chasing tighter is not meaningful.
+### XIAO-S3 — dedicated 2.4 GHz
+- **2.4 GHz Wi-Fi sniffing, continuous** — its sole radio job. The SX1262 LoRa
+  is NO LONGER on the S3 (moved to the ItsyBitsy); the S3 is a pure 2.4 GHz
+  sniffer with ample spare GPIO.
 
-**GPS does NOT interfere with 5 GHz Wi-Fi sniffing** — the C5 is the least
-stressed board in the system:
-- RF: GPS is RECEIVE-ONLY at ~1.575 GHz (L1); it never transmits, so there is
-  nothing to collide with the 5 GHz sniffer. No shared airtime, no TX bursts.
-- CPU: GPS is a trickle — NMEA over UART at ~9600 baud, ~1 sentence/second.
-  Parsing costs almost nothing beside the Wi-Fi capture interrupt load. No
-  tight polling (unlike the SX1262 BUSY line); at most an optional 1 Hz PPS.
-- Scheduling: a once-a-second bounded parse cannot stall a channel-hop timer
-  the way a long LoRa TX could. No jitter concern.
-- BUILD NOTE (reverse concern): GPS signals sit below the noise floor, so the
-  risk runs the OTHER way — board switching noise / RF can desensitize the GPS
-  receiver. Give the GPS antenna a clear sky view and isolation from noisy
-  supplies and digital lines. Relevant for the enclosed 3D-printed case: GPS
-  behind plain plastic is fine; GPS crammed next to regulators/RF shielding is
-  not. This affects GPS fix quality, never the Wi-Fi capture.
-
-### XIAO-S3 — 2.4 GHz sniffing + LoRa gateway
-- **2.4 GHz Wi-Fi sniffing — THIS IS THE PRIORITY TASK.** The XIAO-S3's primary
-  job is continuous 2.4 GHz capture; it must not drop frames for LoRa.
-- **Wio-SX1262 LoRa (SPI) — LESSER, BEST-EFFORT priority.** LoRa is occasional
-  (only when relaying sensor-stick traffic at distance). It must yield to the
-  2.4 GHz sniffer. See the firmware-priority contract below.
+**GPS geotag strategy (every capture gets a location):** the hub holds the GPS
+and caches LAST-KNOWN FIX — captures arrive far faster than GPS updates, so
+NEVER gate a capture on a fresh fix; stamp the most recent fix onto every record
+as it is aggregated. Zero extra cost. At 1 Hz on foot the fix is already below
+the ~2.5–3 m GPS error floor; 5 Hz only tightens the vehicle case. Honest limit:
+the geotag is "position at the most recent fix," not the exact capture instant —
+at or below the GPS hardware error floor, so chasing tighter is not meaningful.
 
 ---
 
 ## Band coverage (why this split is clean)
 
-Wi-Fi capture is split across two bands on two separate chips:
+Wi-Fi capture is split across two bands on two separate chips, BLE on a third:
 - 2.4 GHz Wi-Fi → XIAO-S3 (internal radio)
 - 5 GHz Wi-Fi  → XIAO-C5 (dedicated)
 - BLE (2.4 GHz) → Waveshare (internal radio)
 
 Three different chips, so 2.4 Wi-Fi, 5 GHz Wi-Fi, and BLE run in genuine
-parallel with no RF contention. Sub-GHz (CC1101) and NFC (PN532) are wired on
-the Waveshare. LoRa (sub-GHz) is on the XIAO-S3's external SX1262.
+parallel with no RF contention. The on-demand radios — sub-GHz (CC1101), NFC
+(PN532), 2.4 GHz-proprietary (nRF24) and LoRa (SX1262) — all live on the
+ItsyBitsy and are NOT continuous, so they do not compete for continuous airtime
+with the three sniffers.
 
 ---
 
-## XIAO-S3 firmware priority contract (2.4 GHz > LoRa)
+## ItsyBitsy on-demand contract (single-core, one radio at a time)
 
-LoRa and 2.4 GHz Wi-Fi do NOT contend at RF level — different radios, different
-bands (SX1262 sub-GHz vs internal 2.4 GHz), different antennas. They CAN
-contend for CPU. Rules to keep sniffing first-class:
+The ItsyBitsy M0 is single-core (SAMD21). It hosts four radios but runs only ONE
+radio action at a time, prompted by the hub:
 
-1. **Dual-core split:** pin the 2.4 GHz Wi-Fi promiscuous capture + its
-   callback to one core; run SX1262 SPI/DIO1/BUSY handling on the other.
-2. **2.4 GHz sniffing is the priority task.** LoRa TX/RX is best-effort and
-   must never starve the Wi-Fi capture callback or stall the channel-hop timer.
-3. **Protect the channel-hop timer:** a long LoRa op (high spreading factor =
-   hundreds of ms to >1 s time-on-air) must not delay channel hops, or the
-   sniffer dwells too long on one channel and misses others.
-4. LoRa is OCCASIONAL (bursty sensor-stick comms), not continuous — this is
-   close to a best case; the rest of the time the XIAO-S3 is 100% on Wi-Fi.
-5. During a LoRa transmit/receive window the Wi-Fi radio keeps listening on its
-   current channel; only the hop cadence is at risk, never the capture itself.
+1. **Serialize on demand:** the hub issues one request (sub-GHz burst / NFC read
+   / nRF24 scan / LoRa relay) and waits for the response (or a timeout) before
+   the next. A request arriving while another op runs is answered BUSY.
+2. **No continuous stream here:** none of these radios is a continuous capture
+   feed (those are the three sniffers on other chips), so serialization is fine.
+3. **LoRa is the longest op:** a high-spreading-factor LoRa transmit can hold the
+   node busy for up to ~1 s; the hub tolerates that latency on the other
+   on-demand radios during a relay. LoRa is occasional (sensor-stick comms only).
+
+The command set for all of this is `components/fh_protocol/include/fh_ondemand.h`.
 
 ---
 
@@ -175,53 +116,52 @@ range**, **LoRa when at distance**. Transport selection logic lives on the
 
 - **BLE path:** Waveshare talks to the sensor stick directly on its own radio.
 - **LoRa path:** the Waveshare has NO LoRa radio. The only SX1262 is on the
-  XIAO-S3, so the XIAO-S3 is the **system LoRa gateway**. The Waveshare sends
-  "relay this to the sensor stick over LoRa" across the UART link; the XIAO-S3
-  transmits on the SX1262 and relays replies back. This is why the
-  Waveshare↔XIAO-S3 UART is BIDIRECTIONAL and carries two traffic types:
-  (a) XIAO-S3 capture records going up, (b) sensor-stick LoRa payloads both ways.
+  **ItsyBitsy**, so the ItsyBitsy is the **system LoRa gateway**. The Waveshare
+  sends "relay this to the sensor stick over LoRa" across the ItsyBitsy UART
+  link (LORA_TX_REQ in `fh_ondemand.h`); the ItsyBitsy transmits on the SX1262
+  and relays replies back (LORA_RX_IND). The Waveshare↔ItsyBitsy link is
+  BIDIRECTIONAL: hub prompts down, radio results + inbound LoRa up.
 
 ---
 
 ## Topology
 
 ```
-   GPS (UART) ─┐
-               ▼
-   ┌────────────────────────────┐
-   │ XIAO-C5                    │  UART link B   ┌───────────────────────────────┐
-   │  5 GHz Wi-Fi sniff (cont.) │───────────────►│ Waveshare ESP32-S3 (mainboard)│
-   │  GPS geotag + GPS time     │  GPIO32/33     │  CC1101 ┐                     │
-   └────────────────────────────┘                │  nRF24  ├ SPI radios + NFC    │
-                                                  │  PN532  ┘  (one at a time)    │
-   ┌────────────────────────────┐  UART link A   │  BLE sniff (internal radio)   │
-   │ XIAO-S3                    │◄──────────────►│  sensor-stick orchestration   │
-   │  2.4 GHz Wi-Fi sniff (PRI) │  TXD/RXD 25/27 │  3.5" LCD + touch UI          │
-   │  SX1262 LoRa (best-effort) │  bidirectional │  2× UART aggregator           │
-   │  = system LoRa gateway     │                │         ▼                     │
-   └────────────────────────────┘                │  recon_log → microSD (1 CSV)  │
-                                                  └───────────────────────────────┘
+   ┌──────────────────────────┐ UART (2 Mbaud) ┌───────────────────────────────┐
+   │ XIAO-C5                  │───────────────►│ Waveshare ESP32-S3 V2 (HUB)   │
+   │  5 GHz Wi-Fi sniff       │                │  BLE sniff (internal radio)   │
+   └──────────────────────────┘                │  GPS (NEO-6M on UART)         │
+   ┌──────────────────────────┐ UART (2 Mbaud) │  3.5" LCD + touch UI          │
+   │ XIAO-S3                  │───────────────►│  sensor-stick orchestration   │
+   │  2.4 GHz Wi-Fi sniff     │                │  4× UART aggregator           │
+   └──────────────────────────┘                │          ▼                    │
+   ┌──────────────────────────┐ UART (bidir)   │  recon_log → microSD (1 CSV)  │
+   │ ItsyBitsy M0 (on-demand) │◄──────────────►│                               │
+   │  CC1101 nRF24 PN532       │  prompts down  └───────────────────────────────┘
+   │  SX1262 LoRa (gateway)    │  results up     ▲
+   └──────────────────────────┘        GPS (NEO-6M) UART ─┘
 ```
+All three satellite nodes + the GPS feed the hub over UART; the hub is the single
+SD writer and the only board with a screen.
 
 ---
 
-## Interconnect — two UART links into the Waveshare (verified)
+## Interconnect — FOUR UART links into the Waveshare
 
-| Link | Daughterboard | Waveshare pins | Controller | Direction |
-|---|---|---|---|---|
-| A | XIAO-S3 (2.4 GHz + LoRa) | TXD/RXD = hdr 25/27 (GPIO43/44) | hardware UART | bidirectional (records up + LoRa relay both ways) |
-| B | XIAO-C5 (5 GHz + GPS) | GPIO33/32 = hdr 12/14 | 2nd UART, remapped | mainly C5→Waveshare (records + GPS fixes) |
+The hub aggregates four UART feeds. Exact hub GPIO assignments are in
+`firmware/src/fh_pins.h` (pins taken from the verified J8 header, camera omitted).
 
-Console stays on USB-CDC so it does not fight link A. Frames: length-prefixed
-with a message-type field (capture-record vs LoRa-relay vs GPS-fix) + checksum
-(UART can drop bytes). Full frame spec below.
+| Link | Peer | Rate | Direction |
+|---|---|---|---|
+| C5  | XIAO-C5 (5 GHz capture) | 2 Mbaud | mainly C5→hub (records) |
+| S3  | XIAO-S3 (2.4 GHz capture) | 2 Mbaud | mainly S3→hub (records) |
+| Itsy| ItsyBitsy (on-demand radios) | moderate | BIDIRECTIONAL (prompts down, results + inbound LoRa up) |
+| GPS | GY-NEO6MV2 NEO-6M | 9600–38400 | GPS→hub NMEA (hub TX only for CFG at boot) |
 
-**Link baud (DEF CON-class load):** run both capture links at **2 Mbaud**
-(2000000). Rationale in the data-path section below — 115200 drowns instantly,
-921600 is only a floor in a hostile RF environment, 2 Mbaud carries a
-dedup'd dual-band load with burst headroom over the short board-to-board
-traces. (This is the inter-board link baud; the GPS→C5 UART is a separate,
-slower link at 38400–115200 as noted in the XIAO-C5 section.)
+Console stays on USB-CDC (USB-Serial-JTAG) so it never fights the data links.
+Frames are length-prefixed, type-tagged, CRC-checked (full spec below). The two
+capture links run at 2 Mbaud; the ItsyBitsy link is lower-rate (occasional
+prompts/results); the GPS link is slow NMEA.
 
 ---
 
@@ -299,7 +239,9 @@ useful for recon.
 All inter-board UART traffic uses this frame. It is self-synchronizing (a
 dropped byte resyncs on the next SYNC marker rather than poisoning the stream)
 and type-tagged so one bidirectional link carries capture records, GPS fixes,
-and LoRa-relay payloads.
+and LoRa-relay payloads. The hub↔ItsyBitsy on-demand commands (0x20–0x3F) extend
+this same frame in `fh_ondemand.h`; the TYPE table below is the capture/health
+core in `fh_frame.h`.
 
 ```
 Offset  Size  Field      Notes
@@ -334,8 +276,8 @@ Offset  Size  Field      Notes
 | 0x01 | CAPTURE       | daughterboard→WS | capture record (below) |
 | 0x02 | GPS_FIX       | C5→WS            | position push for last-known cache |
 | 0x03 | SUMMARY       | daughterboard→WS | periodic per-device count summary |
-| 0x10 | LORA_RELAY_TX | WS→XIAO-S3       | payload to transmit to sensor stick |
-| 0x11 | LORA_RELAY_RX | XIAO-S3→WS       | payload received from sensor stick |
+| 0x10 | LORA_RELAY_TX | WS→ItsyBitsy     | payload to transmit to sensor stick (see also fh_ondemand.h) |
+| 0x11 | LORA_RELAY_RX | ItsyBitsy→WS     | payload received from sensor stick |
 | 0x7E | HEARTBEAT     | daughterboard→WS | liveness counters (below) — always-on, fixed cadence |
 | 0x7D | PING          | WS→daughterboard | "ya dead, man?" — active health check on a missed beat |
 | 0x7C | PONG          | daughterboard→WS | reply to PING (echoes the PING seq) |
@@ -381,8 +323,8 @@ whole log.
   1   1  flags      transport/priority flags
   2   N  data       opaque sensor-stick payload, N = LEN-2
 ```
-LoRa relay is best-effort and MUST yield to 2.4 GHz sniffing on the XIAO-S3
-(per the priority contract). ACK (0x7F) echoes `seq` for reliable relay.
+LoRa relay is best-effort and is serviced one-at-a-time on the ItsyBitsy
+(per the on-demand contract). ACK (0x7F) echoes `seq` for reliable relay.
 
 ### PAYLOAD — HEARTBEAT (TYPE 0x7E), 14 B — liveness, not just presence
 
@@ -394,11 +336,12 @@ proof-of-work counters:
 ```
 Offset  Size  Field          Notes
 ------  ----  -------------  --------------------------------------------------
-  0      1    src_id         which daughterboard (1=c5, 2=xs3)
+  0      1    src_id         which node (1=c5, 2=xs3, 3=itsybitsy)
   1      4    uptime_s       u32 seconds since boot — RESET TO 0 = silent reboot
   5      4    capture_count  u32 records captured since boot — must keep rising
   9      2    dropped_keys   u16 seen-table evictions (saturation indicator)
- 11      1    task_alive     bitmask: capture / GPS / LoRa task liveness bits
+ 11      1    task_alive     bitmask: per-node task liveness (capture on C5/S3;
+                             radio-handler on ItsyBitsy)
  12      2    free_heap_kb   u16 KB free — catch a slow leak before it crashes
 ```
 
@@ -448,17 +391,19 @@ source, band, channel, type, mac, rssi, lat, lon, time, extra
 
 | source | origin | geotag | clock |
 |---|---|---|---|
-| ws-cc1101 | Waveshare SPI | last-known (from C5) | Waveshare RTC |
-| ws-nrf24  | Waveshare SPI | last-known | Waveshare RTC |
-| ws-nfc    | Waveshare SPI (PN532) | last-known | Waveshare RTC |
+| itsy-cc1101 | ItsyBitsy (sub-GHz, on-demand) | last-known (hub GPS) | Waveshare RTC |
+| itsy-nrf24  | ItsyBitsy (2.4 GHz, on-demand) | last-known | Waveshare RTC |
+| itsy-nfc    | ItsyBitsy (PN532, on-demand) | last-known | Waveshare RTC |
 | ws-ble    | Waveshare internal radio | last-known | Waveshare RTC |
-| c5-wifi5  | XIAO-C5 over link B | GPS (exact) | GPS time |
-| xs3-wifi24| XIAO-S3 over link A | last-known | Waveshare RTC |
+| c5-wifi5  | XIAO-C5 over its UART link | last-known (hub GPS) | Waveshare RTC |
+| xs3-wifi24| XIAO-S3 over its UART link | last-known | Waveshare RTC |
 
 (LoRa relay traffic is comms, not capture — it is not logged as a capture row
-unless we choose to log a sensor-stick event.) The XIAO-C5 periodically pushes
-its GPS fix to the Waveshare, which caches "last known position" to stamp onto
-non-GPS records so the whole log is geotagged.
+unless we choose to log a sensor-stick event.) GPS is now HUB-LOCAL (NEO-6M on a
+hub UART); the hub caches "last known position" and stamps it onto every record
+so the whole log is geotagged. No node produces source-exact GPS time anymore —
+every row uses the hub's last-known fix + hub RTC clock, which is within the GPS
+error floor (see the GPS geotag note up top).
 
 ---
 
@@ -533,43 +478,39 @@ project alongside the three node firmwares; version-controlled, not shipped.
 
 ---
 
-## Verification summary (2026-10-19)
+## Verification summary
 
 | Item | Verdict | Evidence |
 |---|---|---|
-| Waveshare UART aggregation | PASS | header: TXD/RXD + GPIO32/33 confirmed broken out |
-| Waveshare 5 GHz capability | N/A (expected) | Waveshare docs: 2.4 GHz Wi-Fi only → XIAO-C5 required |
-| XIAO-C5 5 GHz promiscuous | PASS | ESP-IDF v6.1 C5 `esp_wifi_set_promiscuous()`; esp32-mac-collector |
-| XIAO-C5 GPS + Waveshare UART | PASS w/ note | 1 HW UART on header; GPS + link need a 2nd UART remapped to free GPIO |
-| XIAO-S3 for SX1262 + 2.4 Wi-Fi + UART | PASS (comfortable) | ANT_SW handled on-module via SX1262 DIO2 — host needs only 7 pins; 9/11 GPIO used, ~2 spare |
-| LoRa on Waveshare instead? | NO | Waveshare short 1-2 fast native GPIO (BUSY+DIO1); LoRa stays on XIAO-S3 |
+| Hub UART aggregation (4 links) | PASS | J8 header: 11 free native GPIO vs 8 needed (4 UART pairs), ~3 spare, camera omitted |
+| Waveshare 5 GHz capability | N/A (expected) | Waveshare docs: 2.4 GHz Wi-Fi only → XIAO-C5 required for 5 GHz |
+| XIAO-C5 5 GHz promiscuous (IDF 6.1) | PASS | esp_wifi WIFI_BAND_MODE_5G_ONLY + set_channel; esp32-mac-collector proves HW |
+| ItsyBitsy holds all 4 on-demand radios | PASS | compile test: RadioLib 7.8.1 + Adafruit PN532 1.3.4 link, 26% flash, RAM within 32 KB |
+| SX1262 host pins | 8 (not 7) | Wio-SX1262-for-XIAO schematic exposes a host RF_SW1 line; DIO3/TCXO on-module |
+| GPS on hub | PASS | NEO-6M on a hub UART; 1 Hz already < GPS error floor on foot |
+| LoRa on Waveshare instead? | NO | Waveshare short 1-2 fast native GPIO (BUSY+DIO1); LoRa lives on the ItsyBitsy |
 
 ---
 
 ## Open hardware items (none block the design)
-1. ~~Waveshare GPIO26 (header pin 10): may be tied to R8 PSRAM — verify vs
-   schematic before use.~~ RESOLVED by DECISION (2026-10-19): treat GPIO26 as
-   RESERVED / DO-NOT-USE. Nothing in the design needs it (the UART links are on
-   GPIO43/44 and GPIO32/33, both confirmed clean), so we simply never touch it
-   and the PSRAM question never has to be answered. Removes the only
-   hardware-in-hand check that was not strictly necessary.
-2. ~~XIAO-S3: confirm whether the Wio-SX1262 board handles ANT_SW internally
-   (frees a pin if so).~~ RESOLVED (2026-10-19, Wio-SX1262 datasheet + Seeed
-   wiki): it is a "LoRa Pure RF module" — the SX1262 drives its own antenna
-   switch via DIO2 (`SetDIO2AsRfSwitchCtrl`) and the TCXO via DIO3, both
-   on-module. NO host GPIO for ANT_SW. Host drives only SPI (SCK/MOSI/MISO) +
-   NSS + RESET + BUSY + DIO1 = 7 pins. With the UART link (2) that is 9 of the
-   XIAO-S3's 11 GPIO → ~2 SPARE. The tightest board has breathing room, not
-   zero slack.
-3. Power: nRF24+PA+LNA (Waveshare) and SX1262 (XIAO-S3) are TX brown-out risks
-   — dedicate decoupling / supply per radio; do not daisy-chain off one
-   marginal regulator.
+1. Hub pin map: fh_pins.h was rewritten for the real ESP32-S3 GPIO range using
+   the verified J8 header (the old GPIO 32/33/23 were classic-ESP32 pins that do
+   not exist on the S3). The 4 UART links use free J8 pins; confirm each against
+   the physical board + the V2 (Rev2.0) schematic at bring-up.
+2. SX1262 (on the ItsyBitsy): the Wio-SX1262-for-XIAO board exposes a HOST
+   RF_SW1 pin — it needs 8 host signals (SPI 3 + NSS + RESET + BUSY + DIO1 +
+   RF_SW1), NOT 7. DIO3/TCXO is module-managed. Verify RF_SW1 on your module rev.
+3. Power: nRF24+PA+LNA and the SX1262 (both on the ItsyBitsy) are TX brown-out
+   risks — dedicate decoupling / supply per radio; do not daisy-chain off one
+   marginal regulator. The ItsyBitsy's 3V3 may need help driving PA/LNA spikes.
 4. ~~Define the exact UART frame format + checksum + message-type field and the
    record schema `extra` payload per source type.~~ RESOLVED — see the UART
    frame format and data-path sections. Remaining sub-item: finalize the
    per-source `extra` payload contents during firmware bring-up.
 5. XIAO-C5 IDF quirk: on IDF v6.0, a secondary-channel offset in promiscuous
-   mode dropped HE (11ax) frame reception — watch during 5 GHz bring-up.
+   mode dropped HE (11ax) frame reception — status on 6.1 unconfirmed. Test
+   5 GHz at 20 MHz / WIFI_SECOND_CHAN_NONE first, verify HE reception, THEN try
+   any secondary-channel config.
 6. **Power — DECISION: single 18650, cold-swap 4 cells over a DEF CON day**
    (battery 1 → morning break → battery 2 → lunch → battery 3 → afternoon
    break → battery 4; charge overnight). ~4 h sustained per cell at ~550 mA
@@ -597,9 +538,9 @@ auto-reset hardware, no silent self-healing, no pretending a degraded state is
 fine. Detection comes from the heartbeat/ping system (see frame format).
 
 ### Partial failure — keep logging (degrade, don't halt)
-If a daughterboard dies, the hub KEEPS logging its own radios
-(CC1101/nRF24/PN532/BLE) and the surviving daughterboard. A lost capture node
-never halts the whole device.
+If a node dies, the hub KEEPS logging whatever is still alive — its own BLE, the
+surviving sniffer(s), and the ItsyBitsy's on-demand radios. A lost node never
+halts the whole device.
 
 ### No hardware reset line — announce instead (DECISION)
 We deliberately spend NO GPIO on hub→daughterboard reset lines. On a detected
@@ -651,10 +592,10 @@ knows whether a reboot will help.)
 ## Antenna plan & RF layout (best-effort placement, tune with data)
 
 ~7 antennas share a small volume (2.4 GHz ×2: Waveshare BLE + XIAO-S3 Wi-Fi;
-5 GHz: XIAO-C5; sub-GHz ×2: CC1101 + SX1262; nRF24 2.4 GHz; GPS). Same-band
-pairs will desensitize each other if crowded. No spectrum analyzer / anechoic
-chamber — so this is an iterative, measured trial-and-error task, done at build
-time with hardware in hand.
+5 GHz: XIAO-C5; sub-GHz ×2: CC1101 + SX1262 on the ItsyBitsy; nRF24 2.4 GHz on
+the ItsyBitsy; GPS on the hub). Same-band pairs will desensitize each other if
+crowded. No spectrum analyzer / anechoic chamber — so this is an iterative,
+measured trial-and-error task, done at build time with hardware in hand.
 
 ### Physical approach
 - Separate antennas as much as the case allows; target ≥ a few inches of
@@ -688,31 +629,36 @@ lock placement. Accepted as best-effort-with-tuning-later.
 
 ---
 
-## Build tooling — all ESP-IDF, one shared protocol component
+## Build tooling — ESP-IDF for the 3 ESP32s, Arduino for the ItsyBitsy
 
-### DECISION: target ESP-IDF for ALL THREE node firmwares (no Arduino)
-- All three chips (ESP32-S3, C5, S3) are first-class ESP-IDF targets; the C5
-  needs recent IDF (v6.x) for 5 GHz promiscuous anyway, so we are on modern IDF
-  regardless.
-- One toolchain, one build system (CMake / `idf.py`), one flash pattern.
-  Per project: `idf.py set-target {esp32s3|esp32c5}` then identical workflow.
-  The #8 "build story" is "same commands, different target."
-- Keeps the existing C/C++ reboot-logging work native — no Arduino-compat shim.
+### DECISION: ESP-IDF 6.1 for the three ESP32 nodes; Arduino/SAMD for the ItsyBitsy
+- The three ESP32 chips (Waveshare S3 hub, XIAO-C5, XIAO-S3) are first-class
+  ESP-IDF 6.1 targets. One `idf.py` workflow; per project
+  `idf.py set-target {esp32s3|esp32c5}`.
+- The ItsyBitsy M0 is a SAMD21 — it builds with the **Arduino IDE** (Adafruit
+  SAMD core), NOT ESP-IDF. This is the one non-ESP-IDF node, which is why it
+  lives in its own `firmware-itsybitsy/` tree (and its own repo branch). It was
+  chosen as the on-demand radio host because its 23 GPIO comfortably hold all
+  four radios (compile-verified) while freeing the pin-starved hub.
+- Why not Arduino-as-component for the C5: the arduino-esp32 core that supports
+  the C5 is pinned to IDF 5.5, so it cannot reach the IDF 6.1 target — hence
+  native ESP-IDF for all three ESP32s.
 
-### Shared frame format = a shared IDF COMPONENT (drift-proof)
-Same framework ALLOWS a single shared header; sharing it is still a deliberate
-choice. Put the wire format in ONE component all three projects include, so
-there are not three copies to drift:
+### Shared frame format = a shared component (drift-proof)
+Put the wire format in ONE place all nodes include, so there are not four copies
+to drift:
 - `components/fh_protocol/` holds `fh_frame.h` — the SYNC/TYPE/LEN/CRC frame,
-  all TYPE codes, and the payload structs (CAPTURE, GPS_FIX, SUMMARY,
-  HEARTBEAT, PING, PONG, LORA_RELAY, ACK) + the CRC16 function.
-- All three firmwares pull it in (git submodule or `EXTRA_COMPONENT_DIRS`).
-  Change the struct once → all three rebuild against it → drift is structurally
-  impossible.
+  the capture/health TYPE codes, and the payload structs (CAPTURE, GPS_FIX,
+  SUMMARY, HEARTBEAT, PING, PONG, LORA_RELAY, ACK) + the CRC16 function.
+  `include/fh_ondemand.h` adds the hub↔ItsyBitsy on-demand command set (0x20–0x3F).
+- The three ESP-IDF firmwares pull it in via `EXTRA_COMPONENT_DIRS`; the
+  ItsyBitsy (Arduino) includes the same headers directly (they are plain C,
+  framework-agnostic). Change a struct once → every node rebuilds against it →
+  drift is structurally impossible.
 - `__attribute__((packed))` on payload structs so no compiler padding misaligns
-  the specced byte layout (all three are little-endian ESP32 — no byte-swap).
+  the specced byte layout (all chips are little-endian — no byte-swap).
 - CRC + framing helpers live in the SAME component so sender and receiver run
-  IDENTICAL code, not two reimplementations that could disagree.
+  IDENTICAL code, not reimplementations that could disagree.
 - The frame-format section above IS the contents of `fh_protocol/fh_frame.h`.
 
 ---
@@ -783,7 +729,7 @@ context survives the (~6-month) timeline to build. Status as of 2026-10-19.
 | 5 | Antenna plan & RF layout | **RESOLVED (approach) — tune at build** | DECIDED approach: spacing ≥ a few inches + perpendicular orientation for same-band pairs; best-effort placement then measured tuning. Antenna-tuning firmware mode reads per-radio baseline-vs-neighbors-on RSSI/noise DELTAS on the LCD to quantify desensitization. Relative not calibrated — fine for comparative tuning. Physical tuning still happens with hardware in hand. See Antenna plan section. |
 | 6 | Operator UI (3.5" LCD) | **DEFERRED (design) — requirements GATHERED** | Still "future Joshua," ~6 mo; interaction model undecided. But requirements are now consolidated (see UI requirements backlog): green/amber/red status bar (silent-when-healthy), red always pops a message naming module-fault vs node-down, four-state health shown as up/down, terse #3 alert strings reused, SAFE-TO-SWAP control, config list + STOCK/MODIFIED indicator (which settings = TBD), at-a-glance field view. Antenna-tuning firmware explicitly NOT part of this UI. |
 | 7 | Legal / operational scope | **DECIDED (firm)** | DEF CON is a declared adverse environment ("protect ya neck" digitally — everyone is warned). Beyond DEF CON, the device is used ONLY where usage is fully disclosed OR there is explicit permission (e.g. own home-lab). This is a hard operating boundary, not a maybe. Capture is passive; any TX is scoped to the user's own sensor-stick link. |
-| 8 | Build tooling (3 firmware projects) | **RESOLVED** | DECIDED: all-ESP-IDF (no Arduino) across all three nodes; one `idf.py` workflow, per-project `set-target`. Shared frame format lives in ONE IDF component `components/fh_protocol/` (packed structs + shared CRC) included by all three → drift structurally impossible. See Build tooling section. |
+| 8 | Build tooling (4 firmware projects) | **RESOLVED** | 3 ESP32 nodes on ESP-IDF 6.1 (one `idf.py` workflow, per-project `set-target`); the ItsyBitsy M0 on Arduino/SAMD. Shared frame format in `components/fh_protocol/` (fh_frame.h + fh_ondemand.h), plain C, included by all four → drift structurally impossible. See Build tooling section. |
 | 9 | Config management | **RESOLVED** | DECIDED: config in NVS (internal flash), NEVER on SD — a card format wipes logs, never settings. Compiled-in defaults = supported baseline + NVS override layer (NVS wins); blank NVS still runs on defaults; reset-to-defaults clears NVS keys. Config UI is a deliberately long/flat list to discourage casual tweaking. Stock-vs-modified record ALSO kept in NVS + written to the log header so support knows what deviated from baseline without asking. See Config management section. |
 | 10 | Enclosure & thermal | **DECIDED (direction)** | NOT a stacked sandwich — a roomy cyberdeck-style case with the boards spread out (helps antennas too, see #5). Possibly simple fans for the continuous-sniff heat + TX radios. Antennas exit the case. |
 
@@ -795,10 +741,12 @@ problem and is a together-at-build-time task.
 ---
 
 ## Firmware layout (planned)
-- `firmware/src/` — Waveshare firmware (`fh_pins.h` lives here), builds on the
-  reboot-logging recon_log path.
-- `firmware-c5/`  — XIAO-C5 firmware (own pin map): 5 GHz sniff + GPS.
-- `firmware-xs3/` — XIAO-S3 firmware (own pin map): 2.4 GHz sniff (priority) +
-  SX1262 LoRa gateway (best-effort).
-The daughterboard firmwares are separate projects, not part of the Waveshare
-build. To be added when we start them.
+- `firmware/src/` — Waveshare HUB firmware (`fh_pins.h` lives here): BLE sniff,
+  GPS (NEO-6M), microSD recon_log (reuse reboot-logging RTC-staging path), UI,
+  4-UART aggregation, sensor-stick orchestration. ESP-IDF 6.1.
+- `firmware-c5/`  — XIAO-C5 firmware (own pin map): 5 GHz sniff only. ESP-IDF 6.1.
+- `firmware-xs3/` — XIAO-S3 firmware (own pin map): 2.4 GHz sniff only. ESP-IDF 6.1.
+- `firmware-itsybitsy/` — ItsyBitsy M0 on-demand radio node (CC1101 + nRF24 +
+  PN532 + SX1262 LoRa), driven by `fh_ondemand.h` commands over UART.
+  Arduino/SAMD. Pin map `fh_itsy_pins.h`; 4-radio compile test already PASSED.
+All four are separate projects sharing `components/fh_protocol/` headers.
