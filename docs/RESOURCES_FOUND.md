@@ -1,6 +1,6 @@
 # FHAdvanced — Resources FOUND (research results, 2026-10-19)
 
-Companion to `RESOURCES.md` (the gather list). This file records the actual
+This file records the actual
 links located in the external research pass, with the honesty caveats noted so
 nothing here is mistaken for independently-verified fact. Where a direct
 download URL could not be confirmed, that is said plainly — open the vendor wiki
