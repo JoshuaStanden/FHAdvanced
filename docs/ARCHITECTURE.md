@@ -234,14 +234,16 @@ useful for recon.
 
 ---
 
-## UART frame format (binary, framed, checked) — link A & B
+## UART frame format (binary, framed, checked)
 
-All inter-board UART traffic uses this frame. It is self-synchronizing (a
-dropped byte resyncs on the next SYNC marker rather than poisoning the stream)
-and type-tagged so one bidirectional link carries capture records, GPS fixes,
-and LoRa-relay payloads. The hub↔ItsyBitsy on-demand commands (0x20–0x3F) extend
-this same frame in `fh_ondemand.h`; the TYPE table below is the capture/health
-core in `fh_frame.h`.
+All inter-board UART traffic (the capture links and the ItsyBitsy link) uses
+this frame. It is self-synchronizing (a dropped byte resyncs on the next SYNC
+marker rather than poisoning the stream) and type-tagged so one bidirectional
+link can carry capture records, summaries, health and LoRa-relay payloads. The
+hub↔ItsyBitsy on-demand commands (0x20–0x3F) extend this same frame in
+`fh_ondemand.h`; the TYPE table below is the capture/health core in `fh_frame.h`.
+(The GPS link is NOT framed this way — the hub reads raw NMEA from the NEO-6M
+directly; see the GPS notes.)
 
 ```
 Offset  Size  Field      Notes
@@ -264,24 +266,29 @@ Offset  Size  Field      Notes
   how many payload bytes to read); the mid-frame SYNC check is only a
   fast-recovery aid, not the primary delimiter. If a future transport is more
   lossy, add COBS encoding — not needed for a clean board-to-board trace.
-- **CRC16/CCITT** (poly 0x1021, init 0xFFFF) — cheap on all three chips, catches
-  the single/double-bit and burst errors UART actually produces.
-- **Endianness:** little-endian for all multi-byte fields (native to all three
-  ESP32 chips — no byte-swapping).
+- **CRC16/CCITT** (poly 0x1021, init 0xFFFF) — cheap on every node (the three
+  ESP32s and the SAMD21), catches the single/double-bit and burst errors UART
+  actually produces.
+- **Endianness:** little-endian for all multi-byte fields (native to every node
+  — the ESP32s and the SAMD21 are all little-endian — no byte-swapping).
 
 ### TYPE codes
 
 | TYPE | Name          | Direction        | Payload |
 |------|---------------|------------------|---------|
-| 0x01 | CAPTURE       | daughterboard→WS | capture record (below) |
-| 0x02 | GPS_FIX       | C5→WS            | position push for last-known cache |
-| 0x03 | SUMMARY       | daughterboard→WS | periodic per-device count summary |
-| 0x10 | LORA_RELAY_TX | WS→ItsyBitsy     | payload to transmit to sensor stick (see also fh_ondemand.h) |
-| 0x11 | LORA_RELAY_RX | ItsyBitsy→WS     | payload received from sensor stick |
-| 0x7E | HEARTBEAT     | daughterboard→WS | liveness counters (below) — always-on, fixed cadence |
-| 0x7D | PING          | WS→daughterboard | "ya dead, man?" — active health check on a missed beat |
-| 0x7C | PONG          | daughterboard→WS | reply to PING (echoes the PING seq) |
+| 0x01 | CAPTURE       | C5/S3 → hub      | capture record (below) |
+| 0x02 | GPS_FIX       | (RESERVED/UNUSED) | legacy from when a node held GPS; GPS is now hub-local (NEO-6M read directly), so no node sends this. Kept reserved — do not reuse the code. |
+| 0x03 | SUMMARY       | C5/S3 → hub      | periodic per-device count summary |
+| 0x10 | LORA_RELAY_TX | hub → ItsyBitsy  | payload to transmit to sensor stick (see also fh_ondemand.h) |
+| 0x11 | LORA_RELAY_RX | ItsyBitsy → hub  | payload received from sensor stick |
+| 0x7E | HEARTBEAT     | node → hub       | liveness counters (below) — always-on, fixed cadence |
+| 0x7D | PING          | hub → node       | "ya dead, man?" — active health check on a missed beat |
+| 0x7C | PONG          | node → hub       | reply to PING (echoes the PING seq) |
 | 0x7F | ACK           | both ways        | ack a LORA_RELAY (seq echoed) |
+
+"node" above = any satellite that speaks fh_protocol (XIAO-C5, XIAO-S3, or the
+ItsyBitsy). CAPTURE/SUMMARY come only from the two Wi-Fi sniffers; LoRa relay
+only to/from the ItsyBitsy; HEARTBEAT/PING/PONG from all of them.
 
 ### PAYLOAD — CAPTURE (TYPE 0x01), ~34 B
 
@@ -293,28 +300,22 @@ Offset  Size  Field        Notes
   2      1    frame_type   mgmt/data/ctrl + subtype (probe-req, beacon, …)
   3      1    rssi         int8, dBm
   4      6    mac          6-byte device MAC
- 10      4    gps_time     u32 epoch seconds (C5 fills real GPS time; else 0 =
-                           "WS stamps on arrival with RTC")
- 14      4    lat          int32, degrees × 1e7 (0 if no fix)
- 18      4    lon          int32, degrees × 1e7 (0 if no fix)
+ 10      4    gps_time     u32 epoch seconds — sent as 0 by the node; NO node has
+                           GPS, so the HUB fills time from its RTC on arrival
+ 14      4    lat          int32, deg × 1e7 — sent as 0; HUB stamps last-known fix
+ 18      4    lon          int32, deg × 1e7 — sent as 0; HUB stamps last-known fix
  22      2    count        u16 occurrences since last summary (dedup count)
  24     10    extra        type-specific (e.g. SSID hash, OUI flags) — var,
                            bounded; LEN covers the real length
 ```
 
-### PAYLOAD — GPS_FIX (TYPE 0x02), 16 B
+### PAYLOAD — GPS_FIX (TYPE 0x02) — RESERVED / UNUSED
 
-```
-  0   4  gps_time   u32 epoch seconds
-  4   4  lat        int32, deg × 1e7
-  8   4  lon        int32, deg × 1e7
- 12   1  sats       u8 satellites in fix
- 13   1  fix_qual   u8 fix quality / HDOP bucket
- 14   2  reserved
-```
-The Waveshare caches the latest GPS_FIX as "last-known position" and stamps it
-onto ws-* and xs3-wifi24 records (which have no local GPS), geotagging the
-whole log.
+GPS is HUB-LOCAL in the four-node design: the NEO-6M is wired to the hub and the
+hub parses NMEA itself, so no node ever sends a GPS_FIX frame. TYPE 0x02 is kept
+RESERVED (do not reuse the code) in case a future node-local GPS is ever added.
+The hub caches its own last-known fix and stamps lat/lon (and RTC time) onto
+every record as it is aggregated — see the SD-schema section.
 
 ### PAYLOAD — LORA_RELAY (TYPE 0x10 / 0x11)
 
@@ -328,7 +329,7 @@ LoRa relay is best-effort and is serviced one-at-a-time on the ItsyBitsy
 
 ### PAYLOAD — HEARTBEAT (TYPE 0x7E), 14 B — liveness, not just presence
 
-Sent by EACH daughterboard on a fixed cadence (every 1–2 s) whether or not it
+Sent by EACH satellite node on a fixed cadence (every 1–2 s) whether or not it
 captured anything. A bare "I'm alive" is not enough — a board can be
 alive-but-broken (main loop fine, capture task hung), so the heartbeat carries
 proof-of-work counters:
@@ -371,17 +372,18 @@ A `uptime_s` that resets to 0 is how the hub detects a SILENT reboot
 a DOWN board (keep logging its own radios, flag on UI, attempt reset) is the
 #3 conversation; this section covers DETECTION only.
 
-This largely closes open hardware item #4 — only the per-source `extra` payload
-contents remain, to be finalized during firmware bring-up.
+The per-source `extra` payload contents remain to be finalized during firmware
+bring-up (a parked item — see the Open hardware items list).
 
 ---
 
 ## SD logging — one writer, one schema
 
-The microSD has EXACTLY ONE writer — the Waveshare. Daughterboards never touch
-SD; they stream. The Waveshare parses both UART links and hands every record to
-the SAME `recon_log` path used for its local radios, reusing the reboot-logging
-RTC-staging + batched-flush work unchanged.
+The microSD has EXACTLY ONE writer — the Waveshare hub. Satellite nodes never
+touch SD; they stream frames. The hub parses all UART feeds (XIAO-C5, XIAO-S3,
+ItsyBitsy) plus its own BLE sniff, and hands every record to the SAME `recon_log`
+path, reusing the reboot-logging RTC-staging + batched-flush work unchanged. GPS
+(hub-local NMEA) supplies the last-known fix stamped onto every row.
 
 Unified record (one CSV, `source`-tagged):
 
@@ -433,8 +435,9 @@ the operator knows whether a reboot will even help:
   physical modules, not an ESP32): pop **"Time to reboot — an actual radio
   MODULE went down, not an ESP32."** This tells the user it is a hardware
   module fault, distinct from a node crash.
-- **An ESP32 NODE is down** (a whole daughterboard hung or dead): the #2
-  up/down failure → "A capture node was lost — reboot everything."
+- **A whole NODE is down** (a satellite — XIAO-C5, XIAO-S3, or the ItsyBitsy —
+  hung or dead): the #2 up/down failure → "A capture node was lost — reboot
+  everything."
 Both are red; the text disambiguates module-fault vs node-down.
 
 ### Health — four states internally, UP/DOWN to the human
@@ -466,15 +469,16 @@ settings are DECIDED — 6 settings + 4 maintenance actions, in `CONFIG_MENU.md`
 Only the UI LAYOUT of this list is deferred to the #6 design.
 
 ### At-a-glance operational view (field use)
-Per-band capture counts (2.4 / 5 / BLE), GPS-fix status, storage remaining,
-both link-health indicators — the things you want while walking a floor.
+Per-band capture counts (2.4 / 5 / BLE), GPS-fix status, storage remaining, and
+the satellite link-health indicators (C5 / S3 / ItsyBitsy) — the things you want
+while walking a floor.
 
 ### NOT part of this UI — antenna tuning firmware (#5)
 The antenna-tuning mode is a SEPARATE, standalone firmware flashed onto the
 Waveshare purely for RF bring-up ("so we know how to build future units"). It
 is a bench/factory tool, NOT wired into the main capture firmware's config or
-alerts, and never ships in a field unit. Lives in the repo as its own IDF
-project alongside the three node firmwares; version-controlled, not shipped.
+alerts, and never ships in a field unit. Lives in the repo as its own ESP-IDF
+project alongside the node firmwares; version-controlled, not shipped.
 
 ---
 
@@ -543,9 +547,9 @@ surviving sniffer(s), and the ItsyBitsy's on-demand radios. A lost node never
 halts the whole device.
 
 ### No hardware reset line — announce instead (DECISION)
-We deliberately spend NO GPIO on hub→daughterboard reset lines. On a detected
-daughterboard loss the hub shows an on-screen alert and recommends a graceful
-reboot. The human reboots; the device does not reset nodes itself.
+We deliberately spend NO GPIO on hub→node reset lines. On a detected node loss
+the hub shows an on-screen alert and recommends a graceful reboot. The human
+reboots; the device does not reset nodes itself.
 
 ### Buffers are finite — drop-newest + counter (DECISION)
 Each ESP32 buffers in its own RAM (tens of KB) and drains best-effort to UART /
@@ -561,7 +565,7 @@ exhausting" already accepts this.
 - Brown-out: we do not bridge it — the device just restarts. The RTC-staging
   crash-survival logging (from the reboot-logging work) replays staged records
   on boot, so a hub reset costs at most the unflushed buffer, not the session.
-- Daughterboards are FIRE-AND-FORGET: they do NOT track whether the hub is
+- Satellite nodes are FIRE-AND-FORGET: they do NOT track whether the hub is
   alive and keep sending into a dead/unsynced hub with no handshake. All the
   sync intelligence lives in ONE place — the hub.
 - When the hub comes back from an unclean restart it recognizes the restart was
@@ -575,7 +579,7 @@ keep the two sections in sync.
 
 | Condition | On-screen message | Action asked of operator |
 |---|---|---|
-| ESP32 NODE down (daughterboard; no heartbeat + no PONG) | "A capture node was lost — reboot everything." | full reboot |
+| NODE down (satellite C5/S3/ItsyBitsy; no heartbeat + no PONG) | "A capture node was lost — reboot everything." | full reboot |
 | Radio MODULE down (CC1101/nRF24/PN532/SX1262) | "Time to reboot — an actual radio MODULE went down, not an ESP32." | full reboot |
 | SD card failed/full | "SD card has an issue — full or toast. Power down and swap it." | power down + swap SD |
 | Generic hub showstopper | "Critical error — reboot needed." | full reboot (backed by error log) |
@@ -606,10 +610,11 @@ measured trial-and-error task, done at build time with hardware in hand.
 - Best-effort placement first; tune later with data from the mode below.
 
 ### "Antenna tuning" firmware mode (diagnostic build)
-A special firmware variant (NOT part of capture firmware — a temporary flash,
-fits the all-IDF multi-build story in #8) that turns the invisible RF problem
-into something readable on the LCD. The point is to measure **desensitization**
-(is radio A's activity hurting radio B's hearing), not just raw strength:
+A special firmware variant (NOT part of capture firmware — a temporary flash on
+the Waveshare, an ESP-IDF build like the other ESP32 nodes) that turns the
+invisible RF problem into something readable on the LCD. The point is to measure
+**desensitization** (is radio A's activity hurting radio B's hearing), not just
+raw strength:
 - Per-radio noise floor / RSSI with everything else OFF (baseline).
 - Per-radio noise floor / RSSI with neighbors ON (real-world case).
 - **The DELTA between those two is the number you tune against** — move/reorient
@@ -719,12 +724,12 @@ of when the UI lands.)
 ## System-level open questions (status tracker)
 
 Beyond the hardware items above, these system concerns are tracked here so the
-context survives the (~6-month) timeline to build. Status as of 2026-10-19.
+context survives the (~6-month) timeline to build. Status as of 2026-10-20.
 
 | # | Topic | Status | Notes |
 |---|---|---|---|
-| 2 | Boot time & cross-chip time sync | **MOSTLY RESOLVED** | DECIDED: battery-backed RTC on the Waveshare owns system time (survives cold swaps) — daughterboards need no RTC; hub rebases/stamps. Quiet-vs-crashed SOLVED: always-on HEARTBEAT (0x7E) with liveness counters + active PING/PONG (0x7D/0x7C) tiebreaker → four-state detection (healthy / quiet-but-alive / hung / dead), see frame-format section. Remaining sub-item: timestamp policy during the GPS cold-start window before first fix (hub RTC covers it — just confirm the rebase at bring-up). |
-| 3 | Failure modes & recovery | **RESOLVED** | "Honest, not heroic" — device detects + announces, human recovers. Keep-logging-on-partial-failure; NO reset line (announce instead); drop-newest + counter on full buffers; brown-out = full restart w/ RTC-staging replay; daughterboards fire-and-forget, hub owns re-sync and announces "reboot to re-sync" after an unclean restart; full operator alert taxonomy. See the Failure modes section. UI rendering defers to #6. |
+| 2 | Boot time & cross-chip time sync | **MOSTLY RESOLVED** | DECIDED: battery-backed RTC on the Waveshare owns system time (survives cold swaps) — satellite nodes need no RTC; the hub stamps time on arrival. GPS is hub-local (NEO-6M on a hub UART) and sets the RTC from UTC on first lock. Quiet-vs-crashed SOLVED: always-on HEARTBEAT (0x7E) with liveness counters + active PING/PONG (0x7D/0x7C) tiebreaker → four-state detection (healthy / quiet-but-alive / hung / dead), see frame-format section. Remaining sub-item: timestamp policy during the GPS cold-start window before first fix (hub RTC covers it — confirm the rebase at bring-up). |
+| 3 | Failure modes & recovery | **RESOLVED** | "Honest, not heroic" — device detects + announces, human recovers. Keep-logging-on-partial-failure; NO reset line (announce instead); drop-newest + counter on full buffers; brown-out = full restart w/ RTC-staging replay; satellite nodes fire-and-forget, hub owns re-sync and announces "reboot to re-sync" after an unclean restart; full operator alert taxonomy. See the Failure modes section. UI rendering defers to #6. |
 | 4 | SD capacity & data management | **DECIDED** | High-quality 16 GB / 32 GB cards. Dump whole file(s) at end of day. Plan: cap recon file size, roll to a new file when the cap is hit, archive the completed one (file rotation, not one giant file). Size cap TBD at bring-up. |
 | 5 | Antenna plan & RF layout | **RESOLVED (approach) — tune at build** | DECIDED approach: spacing ≥ a few inches + perpendicular orientation for same-band pairs; best-effort placement then measured tuning. Antenna-tuning firmware mode reads per-radio baseline-vs-neighbors-on RSSI/noise DELTAS on the LCD to quantify desensitization. Relative not calibrated — fine for comparative tuning. Physical tuning still happens with hardware in hand. See Antenna plan section. |
 | 6 | Operator UI (3.5" LCD) | **DEFERRED (design) — requirements GATHERED** | Still "future Joshua," ~6 mo; interaction model undecided. But requirements are now consolidated (see UI requirements backlog): green/amber/red status bar (silent-when-healthy), red always pops a message naming module-fault vs node-down, four-state health shown as up/down, terse #3 alert strings reused, SAFE-TO-SWAP control, config list + STOCK/MODIFIED indicator (which settings = TBD), at-a-glance field view. Antenna-tuning firmware explicitly NOT part of this UI. |
