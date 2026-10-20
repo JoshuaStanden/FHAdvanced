@@ -338,3 +338,47 @@ camera is unused). IO43/44 are the console UART.
    daughterboards: only IO43/44 (console) are a real UART on the header — may
    need to move the console to USB-CDC and reuse 43/44, and find a 2nd UART from
    the camera-GPIO pool.
+
+---
+
+# ROUND 7 — DECISION: camera SACRIFICED (user, 2026-10-19)
+
+User confirmed the camera is not needed. This UNBLOCKS the hub design: the ~12
+camera GPIOs are now the FHAdvanced radio/UART pool.
+
+## Freed pool (camera off)
+Native GPIO: IO17, IO18, IO21, IO38, IO39, IO40, IO41, IO42, IO45, IO46, IO47,
+IO48  (= 12 native pins). Plus TCA9554 EXIO0 (ex CAM_PWDN) frees one slow
+expander output.
+
+## Honest pin budget — it FITS, but tightly (not comfortably)
+Demand on the hub:
+- SPI3 shared bus (SCLK+MOSI+MISO) ....... 3
+- CC1101 (CS + GDO0 IRQ) ................. 2
+- nRF24  (CSN + CE + IRQ) ................ 3   (nRF24 needs BOTH CE and CSN)
+- PN532  (CS + IRQ) ..................... 2
+- UART link A to XS3 (TX+RX) ............ 2
+- UART link B to C5  (TX+RX) ............ 2
+  TOTAL .............................. 14 native pins
+Supply: 12 native camera pins. SHORTFALL = 2.
+
+## Closing the 2-pin gap (decisions, not guesses — finalize at fh_pins.h rewrite)
+- MOVE CONSOLE TO USB-CDC → frees IO43/IO44 for one UART link (+2). Clean, normal
+  on the S3 (USB-Serial-JTAG console). This alone closes the gap → design fits.
+- OPTIONAL relief: put ONE slow chip-select (CC1101 or PN532 CS) on the freed
+  TCA9554 EXIO0 → recovers a native pin, at the cost of the expander-CS transport
+  complexity (Round 3 R3-A: bus-locked manual CS). Use only if still tight.
+- LAST RESORT: drop a radio IRQ to polled mode (hurts throughput) — avoid.
+
+## Resulting allocation plan (to be finalized in the fh_pins.h rewrite)
+- LCD: SPI2_HOST, IO1/3/5 (+BL IO6) — untouched.
+- SD: SDMMC 1-bit, IO9/10/11 — untouched.
+- Radios: SPI3_HOST on three of {IO21,38,39,40,41,42,45,46,47,48}; CS/CE/IRQ
+  from the rest + IO17/IO18.
+- UART link A (XS3): IO43/IO44 (console moved to USB-CDC).
+- UART link B (C5): two more from the camera pool.
+- TCA9554 EXIO0 available as an optional slow CS.
+STATUS: camera-off decision locked. The exact GPIO-per-signal assignment is the
+fh_pins.h REWRITE — real design work, done deliberately (not bolted on). This is
+the last gather/plan step before the hub pin map can be rewritten and the hub
+firmware written. The design is confirmed BUILDABLE on the V2 board.
