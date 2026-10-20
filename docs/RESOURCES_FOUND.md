@@ -272,3 +272,69 @@ every FHAdvanced radio GPIO against the V2 schematic for collisions with the
 board peripherals above and confirm header break-out, (c) assign the radio SPI
 bus to SPI3_HOST (LCD owns SPI2_HOST). fh_pins.h needs a revision pass before
 the hub firmware is written.
+
+---
+
+# ROUND 6 — AUTHORITATIVE V2 pin matrix (from Waveshare pinout image, user-supplied)
+# This is the clean human-readable pin-function table. SUPERSEDES guesses.
+
+## Onboard-peripheral pins — RESERVED, do not reuse
+IO1  LCD SPI MOSI        IO2  LCD SPI MISO     IO3  LCD DC
+IO4  EXIO_INT (TCA9554)  IO5  LCD SPI SCLK     IO6  LCD BL
+IO7  I2C SCL (shared: TP/AU/ESP/RTC/IMU/AXP)   IO8  I2C SDA (shared)
+IO9  SD D0               IO10 SD CMD           IO11 SD CLK
+IO12 I2S MCLK  IO13 I2S SCLK  IO14 I2S ASDOUT  IO15 I2S LRCK  IO16 I2S DSDIN (ES8311)
+IO17 CAM VSYNC  IO18 CAM HREF  IO19 USB D-(U_N)  IO20 USB D+(U_P)
+IO21 CAM D7  IO38 CAM XCLK  IO39 CAM D6  IO40 CAM D5  IO41 CAM PCLK  IO42 CAM D4
+IO43 ESP TXD (UART0 console)  IO44 ESP RXD (UART0 console)
+IO45 CAM D0  IO46 CAM D3  IO47 CAM D1  IO48 CAM D2
+TCA9554 expander lines (ALL 8 used): EXIO0 CAM_PWDN, EXIO1 LCD_RST, EXIO2 TP_INT,
+  EXIO3 SD_CD, EXIO4 RTC_INT, EXIO5 AXP_IRQ, EXIO6 SYS_OUT, EXIO7 PA_CTRL.
+
+## PIN_OUT header (2x16, 2.54mm) — what is actually BROKEN OUT
+IO0, ESP_SCL(IO7), ESP_SDA(IO8), ESP_MISO(IO9), ESP_MOSI(IO10), ESP_SCLK(IO11),
+IO17, IO18, U_N(IO19), U_P(IO20), IO21, IO38, IO39, IO40, IO41, IO42,
+ESP_TXD(IO43), ESP_RXD(IO44), IO45, IO46, IO47, IO48.
+NOTE: IO9/10/11 are broken out AS the SPI nets but are SHARED WITH THE SD CARD.
+IO17/18/21/38-42/45-48 are broken out but are the CAMERA pins (free only if the
+camera is unused). IO43/44 are the console UART.
+
+## ★★ fh_pins.h RECONCILIATION — multiple HARD conflicts (must rewrite)
+| fh_pins.h            | V2 reality                         | verdict        |
+|----------------------|------------------------------------|----------------|
+| SPI SCLK=18          | IO18 = CAM HREF                    | CONFLICT       |
+| SPI MOSI=23          | IO23 does NOT exist on ESP32-S3    | INVALID PIN    |
+| SPI MISO=19          | IO19 = USB D-                      | CONFLICT       |
+| CC1101 GDO0=2        | IO2 = LCD SPI MISO                 | CONFLICT       |
+| nRF24 IRQ=4          | IO4 = EXIO_INT                     | CONFLICT       |
+| PN532 IRQ=17         | IO17 = CAM VSYNC (free if no cam)  | conditional    |
+| nRF24 CSN=15         | IO15 = I2S LRCK                    | CONFLICT       |
+| C5 UART=32/33        | IO32/33 do NOT exist on ESP32-S3   | INVALID PINS   |
+| XS3 UART=43/44       | IO43/44 = UART0 console TXD/RXD    | usable (=console)|
+| SD=9/10/11           | matches SD D0/CMD/CLK              | OK             |
+| I2C=7/8              | matches I2C SCL/SDA                | OK             |
+| EXIO3/5/6/7 for CS   | TCA9554 EXIO3/5/6/7 already used   | CONFLICT (SD_CD/AXP/SYS/PA) |
+
+## ★★ CRITICAL DESIGN FINDING
+1. fh_pins.h was written against the WRONG GPIO RANGE — it uses GPIO32/33/23,
+   which exist on the classic ESP32 but NOT on the ESP32-S3 (S3 = 0-21, 26-48).
+   The entire hub radio pin map must be REDONE against the S3 range + the actual
+   broken-out header above.
+2. The hub is FAR more pin-constrained than the design assumed. The ONLY pins
+   realistically free for FHAdvanced radios are the CAMERA pins
+   (IO17,18,21,38,39,40,41,42,45,46,47,48 ~ 12 pins) AND ONLY IF THE CAMERA IS
+   NOT USED. There is NO spare native SPI bus separate from the SD/console.
+3. The TCA9554 expander is FULLY allocated (all 8 EXIO used) — there are NO free
+   expander lines for radio chip-selects. The fh_pins.h expander-CS plan is dead;
+   CS lines must come from the ~12 camera GPIOs (camera sacrificed).
+4. DECISION NEEDED FROM USER: sacrifice the camera to free ~12 GPIOs for the
+   three SPI radios (CC1101/nRF24/PN532) + their CS/IRQ lines? If NOT, the three
+   wired radios do not physically fit on the hub and the architecture needs
+   rethinking (fewer hub radios, or move some to a daughterboard). This is the
+   single most important open item — it gates whether the hub design is buildable
+   as specced.
+5. A dedicated radio SPI bus would use the camera GPIOs on SPI3_HOST (LCD keeps
+   SPI2_HOST on IO1/3/5; SD is SDMMC on IO9/10/11). UART links to the
+   daughterboards: only IO43/44 (console) are a real UART on the header — may
+   need to move the console to USB-CDC and reuse 43/44, and find a 2nd UART from
+   the camera-GPIO pool.
