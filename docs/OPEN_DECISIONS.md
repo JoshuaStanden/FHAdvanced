@@ -1,3 +1,41 @@
+> ============================================================================
+> UPDATE 2026-10-20 (later same night) — THE HUB PIN DILEMMA BELOW IS RESOLVED
+> by a hardware REDESIGN. Read this banner first; the pin-crunch narrative below
+> is kept for history but is now MOOT (the hub no longer carries wired radios).
+>
+> RESOLVED HARDWARE SPLIT (all on-demand radios on the ItsyBitsy M0):
+>   | Node            | Continuous                 | On-demand                          |
+>   | XIAO-C5         | 5 GHz Wi-Fi + GPS          | —                                  |
+>   | XIAO-S3         | 2.4 GHz Wi-Fi ONLY         | —                                  |
+>   | Hub (Waveshare) | BLE + SD + UI + aggregate  | —                                  |
+>   | ItsyBitsy M0    | —                          | CC1101 + nRF24 + PN532 + SX1262 LoRa |
+>
+> LoRa MOVED OFF the XIAO-S3 → onto the ItsyBitsy with the other on-demand radios
+> (LoRa-to-sensor-stick is on-demand, so it belongs with the on-demand node).
+> The XIAO-S3 is now a pure 2.4 GHz sniffer with plenty of spare GPIO.
+>
+> COMPILE TEST PASSED (ItsyBitsy M0, Adafruit SAMD core 1.7.17):
+>   - All four radio drivers link: RadioLib 7.8.1 (SX1262+CC1101+nRF24) +
+>     Adafruit PN532 1.3.4 (+ BusIO 1.17.4). No errors.
+>   - Flash: 69,200 bytes = 26% of 262,144. RAM: within the 32 KB region (link
+>     succeeded with --check-sections; no RAM-overflow = static use fits).
+>   - Proven STATIC fit; recheck `size` once real firmware logic adds buffers/stack.
+>
+> CONSEQUENCES:
+>   - The hub J8 pin crunch (entire "dilemma" below) DISSOLVES — the hub carries
+>     NO wired radios now. No I/O expander needed. No camera sacrifice needed for
+>     radios (camera-off was from the old plan; revisit whether it's still wanted).
+>   - The hub still needs a UART link to the ItsyBitsy (now 3 daughterboard UARTs:
+>     C5, S3, ItsyBitsy) — it has ample GPIO for that without radios on board.
+>   - fh_pins.h rewrite is now MUCH simpler (hub = LCD + SD + I2C + 3 UART links).
+>   - NEW build item: firmware-itsybitsy/ (Arduino/SAMD) — the on-demand radio
+>     node, speaks the fh_protocol frame over UART. Compile test already pushed to
+>     branch itsybitsy-ondemand.
+>   - Still-open sub-decision: the ItsyBitsy is single-core — on-demand radios
+>     SERIALIZE (one action at a time). Fine because none is continuous, but a long
+>     LoRa transmit blocks a concurrent NFC/sub-GHz action. Acceptable per design.
+> ============================================================================
+
 # FHAdvanced — OPEN DECISIONS / where we stopped (2026-10-19 night)
 
 Picking this up tomorrow. Everything below is research/planning — NO firmware has
