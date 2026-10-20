@@ -1,3 +1,33 @@
+<!-- ========================================================================
+  ⚠️  DO NOT START HERE ANY MORE — SUPERSEDED (updated 2026-10-20)
+  ========================================================================
+  This handoff describes the ORIGINAL THREE-node design and will build the WRONG
+  architecture if followed as-is. The design was redesigned to FOUR nodes on
+  2026-10-20.
+
+  👉 THE CURRENT "START HERE" IS: docs/FIRMWARE_BRIEF.md
+     (with docs/OPEN_DECISIONS.md for the full decision trail).
+
+  What this file gets wrong vs the current design:
+   • Says THREE ESP32s + "all three ESP-IDF". Reality: FOUR nodes — 3 ESP32
+     (ESP-IDF 6.1) + 1 Adafruit ItsyBitsy M0 (Arduino/SAMD).
+   • Says the Waveshare hub hosts CC1101/nRF24/PN532 SPI radios. Reality: the
+     hub hosts NO wired radios — they moved to the ItsyBitsy.
+   • Says XIAO-S3 does 2.4 GHz + SX1262 LoRa gateway. Reality: XIAO-S3 is
+     2.4 GHz ONLY; the LoRa moved to the ItsyBitsy.
+   • Says XIAO-C5 does 5 GHz + GPS. Reality: C5 is 5 GHz ONLY; GPS moved to hub.
+   • Says SX1262 = 7 host pins, ANT_SW on-module. Reality: 8 host pins (needs
+     RF_SW1).
+   • The hub build steps (SPI radios one-at-a-time, RTC-from-GPS-over-link-B,
+     "two UART receivers") are OBSOLETE. The hub now aggregates FOUR UART links
+     (C5, S3, ItsyBitsy, GPS), does BLE + local GPS, and no SPI radios.
+   • fh_pins.h was rewritten (old GPIO 32/33/23 don't exist on the S3).
+
+  The STILL-VALID parts (dedup model, CSV schema, invariants, parked TODOs,
+  "honest expectation") are mirrored/updated in FIRMWARE_BRIEF.md. Use that.
+  Everything below is retained for historical reference only.
+  ======================================================================== -->
+
 # FHAdvanced — Firmware Build Handoff
 
 **Purpose of this file:** a self-contained brief so a FUTURE assistant session

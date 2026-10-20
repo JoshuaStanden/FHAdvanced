@@ -1,67 +1,48 @@
 # FHAdvanced
 
-Experimental three-ESP32 wireless-recon device (a branch of the FootHoled line).
-A Waveshare ESP32-S3 touch-LCD **HUB** aggregates two XIAO daughterboards — a
-**C5** (5 GHz Wi-Fi + GPS) and an **S3** (2.4 GHz Wi-Fi + LoRa) — into one
-geotagged CSV on a single microSD. Designed with environments like DEF CON in
-mind.
+Experimental **four-node** wireless-recon device (branch of FootHoled), built
+with environments like DEF CON in mind. Continuously captures 2.4 GHz Wi-Fi,
+5 GHz Wi-Fi, and BLE; performs on-demand sub-GHz / 2.4 GHz-proprietary / NFC
+actions and a promptable LoRa link to a sensor stick; aggregates everything into
+one geotagged CSV on a single microSD.
 
-> **Status:** design phase complete and documented. Firmware authoring has
-> **started** with the shared protocol component only. NOTHING has been compiled
-> or flashed — the authoring machine has no ESP-IDF toolchain, so all code here
-> is **design-faithful but UNVERIFIED** until built and flashed on real hardware.
+> **This is the `design-docs` branch — the complete "safe home" for the whole
+> project** (all design docs, research, hardware pinouts, decisions, the shared
+> wire protocol, and the hub pin map). The ItsyBitsy-only code view lives on the
+> `itsybitsy-ondemand` branch.
 
-## Repository layout
+## 👉 Building firmware? START AT `docs/FIRMWARE_BRIEF.md`
+It is the single current, authoritative starting point. (The older
+`docs/BUILD_HANDOFF.md` and `docs/ARCHITECTURE.md` describe a PRE-redesign
+3-node layout and carry SUPERSEDED banners — read the brief instead.)
 
-| Path | What it is |
-|---|---|
-| `docs/ARCHITECTURE.md` | Authoritative system design: node roles, verified pinouts, byte-level UART frame format, dedup model, SD/CSV schema, health protocol, failure modes. |
-| `docs/CONFIG_MENU.md` | Authoritative config spec: 6 exposed settings + 4 maintenance actions; everything else compiled-in. |
-| `docs/BUILD_HANDOFF.md` | Start-here brief to build the firmwares from the docs alone. |
-| `docs/BUILD_DECISIONS.md` | Decisions locked before/while building (framework, GPS, libraries) + two research rounds' findings. **Read after BUILD_HANDOFF.** |
-| `docs/RESOURCES.md` | The reference-material gather list (vendor demos, libraries, datasheets). |
-| `docs/RESOURCES_FOUND.md` | Research results: located links + exact values + honesty caveats. |
-| `firmware/src/fh_pins.h` | HUB (Waveshare) pin map — hardware-verified. |
-| `components/fh_protocol/` | **Shared UART wire-format component** (`fh_frame.h/.c`) + host unit test. Built FIRST so the frame layout cannot drift across the three firmwares. |
+## Node split (final, pin-verified 2026-10-20)
+| Node | Chip | Role | Firmware |
+|---|---|---|---|
+| Hub | Waveshare ESP32-S3-Touch-LCD-3.5 **V2** | BLE + GPS + microSD + UI + aggregate 4 UART feeds | ESP-IDF 6.1, `firmware/` |
+| XIAO-C5 | ESP32-C5 | 5 GHz Wi-Fi (continuous) | ESP-IDF 6.1, `firmware-c5/` |
+| XIAO-S3 | ESP32-S3 | 2.4 GHz Wi-Fi (continuous) | ESP-IDF 6.1, `firmware-xs3/` |
+| ItsyBitsy | ItsyBitsy M0 Express (SAMD21) | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand) | Arduino/SAMD, `firmware-itsybitsy/` |
 
-## Key build decisions (see `docs/BUILD_DECISIONS.md` for full rationale)
+No camera (its J8 header pins are the hub's 4 UART links). No I/O expander needed.
 
-- **Framework:** all **native ESP-IDF 6.1** across all three nodes (Option A).
-  The arduino-esp32 core that supports the C5 is pinned to IDF 5.5, so Arduino
-  cannot reach the 6.1 target — hence native everywhere.
-- **GPS:** GY-NEO6MV2 (u-blox NEO-6M). Attempt 5 Hz + raised baud, re-apply every
-  boot (clone does not persist config), fall back cleanly to 1 Hz. 10 Hz clamped
-  out (NEO-6M max is 5 Hz).
-- **SX1262 (XIAO board):** needs **8** host pins — SPI(3)+NSS+RESET+BUSY+DIO1 **+
-  RF_SW1**. The board exposes a host RF-switch signal; it is NOT fully on-module
-  via DIO2 (an earlier assumption that was corrected during research).
+## Documents
+- **`docs/FIRMWARE_BRIEF.md`** — START HERE: consolidated build reference.
+- **`docs/OPEN_DECISIONS.md`** — full decision trail; read the RESOLVED banner at top.
+- **`docs/BUILD_DECISIONS.md`** — framework/GPS/library decisions + research rounds.
+- **`docs/RESOURCES_FOUND.md`** — research findings (links, exact values, pin facts).
+- **`docs/research-raw/`** — raw ChatGPT research (primary source).
+- **`docs/hardware/`** — pinout images (Waveshare matrix, J8 header, ItsyBitsy).
+- **`docs/ARCHITECTURE.md`**, **`docs/CONFIG_MENU.md`**, **`docs/BUILD_HANDOFF.md`**,
+  **`README_ORIGINAL.md`** — ORIGINAL design docs; still valid for system
+  behaviour / dedup / CSV / failure model, but carry SUPERSEDED banners for the
+  node-location details the redesign changed.
 
-## Build order (dependency order)
+## Code already written (scaffolding; UNVERIFIED until built on hardware)
+- `components/fh_protocol/` — shared UART wire format (`fh_frame.h/.c` + host test).
+- `components/fh_protocol/include/fh_ondemand.h` — hub↔ItsyBitsy command set.
+- `firmware/src/fh_pins.h` — hub pin map (rewritten for the real S3 pins).
+- `firmware-itsybitsy/` — ItsyBitsy pin map + 4-radio compile test (PASSED).
 
-1. ✅ `components/fh_protocol/` — shared frame (done).
-2. ⬜ `firmware/` — HUB (Waveshare): 2 UART RX, unified CSV on microSD, SPI radios
-   (CC1101/nRF24/PN532) one-at-a-time, BLE sniff, heartbeat/PING health, NVS
-   config, RTC-from-GPS.
-3. ⬜ `firmware-c5/` — XIAO-C5: 5 GHz promiscuous sniff + NEO-6M GPS.
-4. ⬜ `firmware-xs3/` — XIAO-S3: 2.4 GHz sniff (priority) + SX1262 LoRa gateway.
-
-## Verifying the protocol on a PC (no hardware needed)
-
-`components/fh_protocol/` is plain C with no framework/hardware dependency, so it
-can be unit-tested on any machine with a C compiler:
-
-```
-gcc -std=c11 -Wall -Wextra -Werror \
-    -I components/fh_protocol/include \
-    components/fh_protocol/fh_frame.c \
-    components/fh_protocol/test/test_fh_frame.c -o test_fh_frame
-./test_fh_frame      # expect: ALL TESTS PASSED
-```
-
-## Parked (explicit TODOs, deferred to hardware bring-up)
-
-- Daughterboard pin maps (`firmware-c5/`, `firmware-xs3/`) — real GPIOs captured
-  from the Seeed pinouts, flag "verify against physical board."
-- Per-source `extra` payload contents in the CAPTURE record.
-- Function/event radio CSV row shapes (CC1101 / nRF24 / PN532).
-- UI visual layout (deferred; behavior/handlers only).
+Per-node firmware LOGIC (hub aggregator/SD/GPS, the two sniffers, the ItsyBitsy
+radio handlers) is NOT yet written — that is the next step at "go time".

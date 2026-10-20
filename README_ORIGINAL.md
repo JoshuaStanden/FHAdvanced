@@ -1,3 +1,8 @@
+<!-- ⚠️ SUPERSEDED (2026-10-20): this is the ORIGINAL 3-node summary. The design
+     is now FOUR nodes — GPS moved to the hub, LoRa + the 3 wired radios moved to
+     an ItsyBitsy M0, XIAO-S3 is 2.4 GHz only, XIAO-C5 is 5 GHz only. See the
+     current README.md and docs/FIRMWARE_BRIEF.md. Kept for history. -->
+
 # FHAdvanced
 
 Experimental three-ESP32 wireless-recon device (branch of FootHoled). A

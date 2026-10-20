@@ -1,3 +1,19 @@
+<!-- ========================================================================
+  ⚠️  MOSTLY VALID — two post-redesign notes (updated 2026-10-20)
+  ========================================================================
+  The config model, dedup model, storage/CSV rules and maintenance actions below
+  are all STILL AUTHORITATIVE. The 2026-10-20 four-node redesign changes only a
+  couple of node-location details referenced here:
+   • The function/EVENT radios (CC1101, nRF24, PN532) are now on the ItsyBitsy M0
+     on-demand node, NOT the Waveshare hub. Their config/record handling is the
+     same; only the hosting node changed.
+   • Setting #5 "GPS fix rate (1 / 5 / 10 Hz)": the module in hand is a NEO-6M
+     (GY-NEO6MV2) which MAXES AT 5 Hz — the "10 Hz" option is unsupported on this
+     hardware and should be clamped out. Default 5 Hz attempted, 1 Hz fallback.
+     GPS now lives on the HUB (not the XIAO-C5).
+  See docs/FIRMWARE_BRIEF.md + docs/OPEN_DECISIONS.md for the current design.
+  ======================================================================== -->
+
 # FHAdvanced — Config Menu (decided)
 
 Companion to `ARCHITECTURE.md` (#6 UI + #9 config). This WAS a candidate list to

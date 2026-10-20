@@ -1,3 +1,42 @@
+<!-- ========================================================================
+  ⚠️  SUPERSEDED IN PART — READ THIS FIRST (updated 2026-10-20)
+  ========================================================================
+  This document describes the ORIGINAL THREE-node design. On 2026-10-20 the
+  HARDWARE SPLIT WAS REDESIGNED to FOUR nodes. The system behaviour, wire
+  protocol, dedup model, CSV schema, failure taxonomy, DEF CON data-path
+  reasoning, config model and UI requirements below are ALL STILL VALID and
+  authoritative. BUT every statement about WHICH NODE hosts WHICH radio is now
+  OUTDATED. The authoritative current design is docs/FIRMWARE_BRIEF.md +
+  docs/OPEN_DECISIONS.md (read the RESOLVED banner at its top).
+
+  WHAT CHANGED (old doc  →  current design):
+   • THREE nodes  →  FOUR nodes (added an Adafruit ItsyBitsy M0 Express).
+   • Waveshare hub hosted CC1101 / nRF24 / PN532  →  the hub hosts NO wired
+     radios. All three moved to the ItsyBitsy.
+   • XIAO-S3 = 2.4 GHz + SX1262 LoRa gateway  →  XIAO-S3 = 2.4 GHz Wi-Fi ONLY.
+     The SX1262 LoRa moved to the ItsyBitsy (all on-demand radios live there).
+   • XIAO-C5 = 5 GHz + GPS  →  XIAO-C5 = 5 GHz Wi-Fi ONLY. GPS moved to the hub.
+   • "All THREE firmwares are ESP-IDF"  →  the 3 ESP32 nodes are ESP-IDF 6.1;
+     the ItsyBitsy is Arduino/SAMD. FOUR firmwares.
+   • SX1262 "7 host pins, ANT_SW on-module via DIO2, no host pin"  →  WRONG for
+     the Wio-SX1262-for-XIAO board: it needs a host RF_SW1 pin = 8 host pins.
+   • "Verification summary: LoRa on Waveshare? NO" still holds, but LoRa is now
+     on the ItsyBitsy, not the XIAO-S3.
+   • The camera was dropped (its J8 pins are the hub's 4 UART links: C5, S3,
+     ItsyBitsy, GPS).
+   • fh_pins.h was fully REWRITTEN (the old GPIO 32/33/23 were classic-ESP32
+     pins that do not exist on the S3). See firmware/src/fh_pins.h.
+
+  RESULT — current node roles:
+     XIAO-C5    : 5 GHz Wi-Fi (continuous)
+     XIAO-S3    : 2.4 GHz Wi-Fi (continuous)
+     Hub (WS)   : BLE (continuous) + GPS + microSD + UI + aggregate 4 UART feeds
+     ItsyBitsy  : CC1101 + nRF24 + PN532 + SX1262 LoRa (all on-demand)
+
+  The on-demand command set (hub↔ItsyBitsy) is components/fh_protocol/include/
+  fh_ondemand.h. Everything below is kept for its still-valid system design.
+  ======================================================================== -->
+
 # FHAdvanced — Architecture Notes (locked three-node design)
 
 Experimental branch of FootHoled. Builds on top of the manually-applied
