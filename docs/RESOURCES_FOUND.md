@@ -200,10 +200,18 @@ Working-with-ESP-IDF subpages. These RESOLVE several Round-3 unknowns.
    promise 6.1, and 6.0→6.1 had breaking changes. Expect possible small fixups
    when building the Waveshare display/touch/SD/CH422G code on 6.1. (Does NOT
    change the Option A decision; just budget a little porting on the hub.)
-2. BOARD REVISION V1 vs V2 — user must check the label on the back of the board.
-   V2 changes: TF-card insert/removal detection, reworked AXP2101 power,
-   battery reverse-protection + warning LED, "adjusted the RF circuit", PWR-button
-   pull-up, better EMC/ESD. SAME firmware on both, but pin against the MATCHING
-   schematic PDF (two different files above). The V2 "adjusted RF circuit" note
-   matters for a board we are bolting extra radios onto.
+2. BOARD REVISION: ★ CONFIRMED = **V2** (user checked the label, 2026-10-19).
+   Pin all wiring verification against the V2 (Rev2.0) schematic ONLY:
+   https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.5/ESP32-S3-Touch-LCD-3.5_Rev2.0.pdf
+   (ignore the V1 schematic). Firmware is identical V1/V2 — nothing in the build
+   changes — but the schematic reference and any revision-specific GPIO do.
+   V2 advantages FOR THIS PROJECT:
+   - TF-card insert/removal DETECTION → a real hardware card-detect line to drive
+     the ARCHITECTURE "SD card has an issue" alert + safe-swap flow, instead of
+     only detecting at write-failure. If we want it, read the card-detect GPIO
+     off the Rev2.0 schematic (V2-only).
+   - Reworked AXP2101 power + battery reverse-protection + warning LED → better
+     for the 18650 cold-swap field use.
+   - "Adjusted RF circuit" + better EMC/ESD → cleaner baseline for a board we are
+     adding CC1101/nRF24/PN532 + two XIAO radios onto.
 - SKUs: 30733 (ESP32-S3-Touch-LCD-3.5), 30934 (…-C variant).
