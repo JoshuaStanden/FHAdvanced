@@ -215,3 +215,60 @@ Working-with-ESP-IDF subpages. These RESOLVE several Round-3 unknowns.
    - "Adjusted RF circuit" + better EMC/ESD → cleaner baseline for a board we are
      adding CC1101/nRF24/PN532 + two XIAO radios onto.
 - SKUs: 30733 (ESP32-S3-Touch-LCD-3.5), 30934 (…-C variant).
+
+---
+
+# ROUND 5 — VERIFIED hub pins from Waveshare's own ESP-IDF demo source
+# (cloned waveshareteam/ESP32-S3-Touch-LCD-3.5, ESP-IDF/01_factory, 2026-10-19)
+
+GROUND TRUTH from the demo source (not the datasheet, not a guess). These are
+what the board actually uses.
+
+## Verified pin assignments (01_factory)
+| Function              | GPIO        | Bus / notes                                  |
+|-----------------------|-------------|----------------------------------------------|
+| I2C SDA               | GPIO8       | shared: touch(FT6336), RTC(PCF85063), AXP2101, QMI8658, expander |
+| I2C SCL               | GPIO7       | shared I2C, 400 kHz                           |
+| microSD CLK           | GPIO11      | SDMMC, 1-bit (slot width=1)                   |
+| microSD CMD           | GPIO10      | SDMMC 1-bit                                   |
+| microSD D0            | GPIO9       | SDMMC 1-bit — SD is OFF the SPI bus (good)    |
+| LCD MOSI              | GPIO1       | SPI2_HOST, 80 MHz                             |
+| LCD SCLK              | GPIO5       | SPI2_HOST                                     |
+| LCD DC                | GPIO3       | SPI2_HOST                                     |
+| LCD backlight (BL)    | GPIO6       | LEDC PWM (not SPI)                            |
+| LCD MISO / CS / RST   | NC          | not connected (CS tied, no readback)          |
+| BOOT button           | GPIO0       | strapping pin                                 |
+
+## ★ TWO CORRECTIONS to earlier assumptions
+1. I/O EXPANDER IS A **TCA9554**, NOT a CH422G. The demo calls
+   `esp_io_expander_new_i2c_tca9554(..., ESP_IO_EXPANDER_I2C_TCA9554_ADDRESS_000, ...)`.
+   ALL earlier notes (and fh_pins.h) assumed CH422G — WRONG for this board/demo.
+   Use the TCA9554 path of espressif/esp_io_expander (idf-managed component used
+   by the demo: `esp_io_expander_tca9554.h`). Address = base 000. The CH422G
+   research (ESP32_IO_Expander, addresses) does NOT apply here. NOTE: the fh_pins.h
+   "EXIO*" expander-CS plan was built on the CH422G assumption — re-derive it for
+   the TCA9554 (8 IO, different API) OR move those CS lines to native GPIO.
+2. LCD occupies GPIO1 (MOSI), GPIO3 (DC), GPIO5 (SCLK), GPIO6 (BL) on SPI2_HOST.
+   These are NOT free. Any FHAdvanced radio mapped onto 1/3/5/6 is a HARD conflict.
+
+## ★ CONFLICTS / CHECKS vs the current fh_pins.h (hub pin map)
+MATCHES (good — fh_pins.h got these right):
+- SD on GPIO9/10/11 ✅ (though order: real = D0=9, CMD=10, CLK=11).
+- I2C on GPIO7/8 ✅.
+MUST RE-CHECK (fh_pins.h assigns radio pins; verify none collide + that they are
+actually broken out on the V2 header — the demo does not touch them, which does
+NOT prove they are free; camera/audio/PSRAM may use them):
+- fh_pins SPI radios SCLK=18 / MOSI=23 / MISO=19 — confirm free on V2 schematic.
+- fh_pins CC1101 GDO0=2, nRF24 IRQ=4, PN532 IRQ=17, nRF24 CSN=15 — confirm free.
+- fh_pins C5 UART = GPIO32/33, XS3 UART = GPIO43/44 — confirm free on V2 header.
+- Expander-CS (EXIO3/5/6/7) must be redone for TCA9554, not CH422G.
+- The LCD SPI bus is SPI2_HOST; put the radio SPI bus on SPI3_HOST to avoid
+  sharing the display's bus (S3 has SPI2 + SPI3 general-purpose hosts).
+
+## Net
+The exact hub GPIOs are now known for the board's own peripherals. Remaining
+hub wiring work is: (a) switch the expander assumption to TCA9554, (b) validate
+every FHAdvanced radio GPIO against the V2 schematic for collisions with the
+board peripherals above and confirm header break-out, (c) assign the radio SPI
+bus to SPI3_HOST (LCD owns SPI2_HOST). fh_pins.h needs a revision pass before
+the hub firmware is written.
