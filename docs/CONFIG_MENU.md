@@ -109,7 +109,7 @@ Safe Battery Swap, Config status view) — see below.
     lon, time, extra`).
   - **Function/EVENT radios (CC1101, nRF24, PN532/NFC)** — NOT continuous; each
     is a deliberate action (sub-GHz burst, 2.4 GHz probe, NFC read) whose RESULT
-    is recorded as an event. These live on the **ItsyBitsy M0 on-demand node**
+    is recorded as an event. These live on the **Raspberry Pi Pico on-demand node**
     (prompted by the hub over UART; see `fh_ondemand.h`), not the hub. Their
     meaningful fields differ per function (an NFC read has tag UID/type; a
     sub-GHz burst has freq + payload snippet) and do not fit the Wi-Fi schema

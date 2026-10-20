@@ -5,9 +5,10 @@
  * ##########################################################################
  * # THIS FILE WAS FULLY REWRITTEN after the hardware split was redesigned.  #
  * # The hub NO LONGER carries any wired radios. All on-demand radios        #
- * # (CC1101 / nRF24 / PN532 / SX1262 LoRa) moved to a dedicated ItsyBitsy   #
- * # M0 node (see ../../firmware-itsybitsy/). The hub is now: BLE (internal  #
- * # radio) + GPS + microSD + LCD/touch UI + the aggregator of 3 UART feeds. #
+ * # (CC1101 / nRF24 / PN532 / SX1262 LoRa) live on a dedicated Raspberry Pi #
+ * # Pico (RP2040) node (see ../../firmware-pico-rp2040/). The hub is now:    #
+ * # BLE (internal radio) + GPS + microSD + LCD/touch UI + the aggregator of #
+ * # 3 UART feeds.                                                            #
  * #                                                                          #
  * # The previous version of this file was INVALID: it used GPIO 32/33/23    #
  * # (classic-ESP32 numbers that DO NOT EXIST on the ESP32-S3) and mapped    #
@@ -18,8 +19,8 @@
  *   - Waveshare S3 (HUB) : BLE sniff + GPS + microSD + UI + aggregate 3 feeds
  *   - XIAO-C5            : 5 GHz Wi-Fi sniff (continuous)           — own fw
  *   - XIAO-S3            : 2.4 GHz Wi-Fi sniff (continuous)         — own fw
- *   - ItsyBitsy M0       : CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)
- *                          — Arduino/SAMD fw, see firmware-itsybitsy/
+ *   - Raspberry Pi Pico  : CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)
+ *                          — arduino-pico fw, see firmware-pico-rp2040/
  * All three satellite nodes stream to the hub over UART using the shared
  * fh_protocol frame format (../../components/fh_protocol/). The hub is the
  * SINGLE writer to the microSD card.
@@ -65,13 +66,13 @@
 #define FH_UART_XS3_RX       38   // J8 pin 8  (IO38) — XS3 -> HUB
 
 /* ===========================================================================
- * UART LINK C — ItsyBitsy M0  (on-demand radio node; BIDIRECTIONAL)
+ * UART LINK C — Raspberry Pi Pico  (on-demand radio node; BIDIRECTIONAL)
  * Hub sends prompts (do sub-GHz burst / NFC read / LoRa relay TX) and the
- * ItsyBitsy returns results + LoRa relay RX. See the command set in
+ * Pico returns results + LoRa relay RX. See the command set in
  * ../../components/fh_protocol/ (fh_ondemand.h).
  * ======================================================================== */
-#define FH_UART_ITSY_TX      39   // J8 pin 10 (IO39) — HUB -> ItsyBitsy (prompts)
-#define FH_UART_ITSY_RX      40   // J8 pin 12 (IO40) — ItsyBitsy -> HUB (results)
+#define FH_UART_PICO_TX      39   // J8 pin 10 (IO39) — HUB -> Pico (prompts)
+#define FH_UART_PICO_RX      40   // J8 pin 12 (IO40) — Pico -> HUB (results)
 
 /* ===========================================================================
  * UART LINK D — GPS (GY-NEO6MV2 / u-blox NEO-6M), RECEIVE-ONLY in practice.

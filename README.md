@@ -8,8 +8,8 @@ one geotagged CSV on a single microSD.
 
 > **This is the `design-docs` branch — the complete "safe home" for the whole
 > project** (all design docs, research, hardware pinouts, decisions, the shared
-> wire protocol, and the hub pin map). The ItsyBitsy-only code view lives on the
-> `itsybitsy-ondemand` branch.
+> wire protocol, the hub pin map, and the Pico on-demand node). It is the single
+> source of truth; there are no separate per-node branches.
 
 ## 👉 Building firmware? START AT `docs/FIRMWARE_BRIEF.md`
 It is the single current, authoritative starting point. `docs/ARCHITECTURE.md`
@@ -22,7 +22,7 @@ has the decision trail.
 | Hub | Waveshare ESP32-S3-Touch-LCD-3.5 **V2** | BLE + GPS + microSD + UI + aggregate 4 UART feeds | ESP-IDF 6.1, `firmware/` |
 | XIAO-C5 | ESP32-C5 | 5 GHz Wi-Fi (continuous) | ESP-IDF 6.1, `firmware-c5/` |
 | XIAO-S3 | ESP32-S3 | 2.4 GHz Wi-Fi (continuous) | ESP-IDF 6.1, `firmware-xs3/` |
-| ItsyBitsy | ItsyBitsy M0 Express (SAMD21) | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand) | Arduino/SAMD, `firmware-itsybitsy/` |
+| Pico | Raspberry Pi Pico (RP2040) | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand) | arduino-pico, `firmware-pico-rp2040/` |
 
 No camera (its J8 header pins are the hub's 4 UART links). No I/O expander needed.
 
@@ -32,7 +32,9 @@ No camera (its J8 header pins are the hub's 4 UART links). No I/O expander neede
 - **`docs/BUILD_DECISIONS.md`** — framework/GPS/library decisions + research rounds.
 - **`docs/RESOURCES_FOUND.md`** — research findings (links, exact values, pin facts).
 - **`docs/research-raw/`** — raw ChatGPT research (primary source).
-- **`docs/hardware/`** — pinout images (Waveshare matrix, J8 header, ItsyBitsy).
+- **`docs/hardware/`** — pinout images (Waveshare matrix, J8 header, and an
+  ItsyBitsy pinout kept only as a historical reference — the on-demand node is
+  now the Pico).
 - **`docs/ARCHITECTURE.md`** — authoritative system design (four-node): node
   roles, UART frame format, dedup model, SD/CSV schema, failure taxonomy,
   DEF CON data-path, config + UI requirements. **`docs/CONFIG_MENU.md`** —
@@ -40,9 +42,9 @@ No camera (its J8 header pins are the hub's 4 UART links). No I/O expander neede
 
 ## Code already written (scaffolding; UNVERIFIED until built on hardware)
 - `components/fh_protocol/` — shared UART wire format (`fh_frame.h/.c` + host test).
-- `components/fh_protocol/include/fh_ondemand.h` — hub↔ItsyBitsy command set.
+- `components/fh_protocol/include/fh_ondemand.h` — hub↔Pico command set.
 - `firmware/src/fh_pins.h` — hub pin map (rewritten for the real S3 pins).
-- `firmware-itsybitsy/` — ItsyBitsy pin map + 4-radio compile test (PASSED).
+- `firmware-pico-rp2040/` — Pico pin map + 4-radio compile test (PASSED: 4% flash, 4% RAM).
 
-Per-node firmware LOGIC (hub aggregator/SD/GPS, the two sniffers, the ItsyBitsy
+Per-node firmware LOGIC (hub aggregator/SD/GPS, the two sniffers, the Pico
 radio handlers) is NOT yet written — that is the next step at "go time".

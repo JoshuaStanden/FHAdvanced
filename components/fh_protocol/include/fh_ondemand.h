@@ -1,21 +1,22 @@
 /*
- * fh_ondemand.h — FHAdvanced on-demand radio command set (hub <-> ItsyBitsy M0)
+ * fh_ondemand.h — FHAdvanced on-demand radio command set (hub <-> Pico)
  *
  * Extends the shared UART wire protocol (fh_frame.h) with the TYPE codes and
- * payloads the HUB uses to PROMPT the ItsyBitsy M0 on-demand radio node, and
- * that the ItsyBitsy uses to RETURN results. The ItsyBitsy hosts four radios,
- * all driven ONE AT A TIME (it is single-core):
+ * payloads the HUB uses to PROMPT the Raspberry Pi Pico (RP2040) on-demand
+ * radio node, and that the Pico uses to RETURN results. The Pico hosts four
+ * radios, driven ONE AT A TIME by the contract below (the RP2040 is dual-core,
+ * so this is a chosen model for simplicity, not a hardware limit):
  *     CC1101 (sub-GHz)  nRF24L01+ (2.4 GHz)  PN532 (NFC)  SX1262 (LoRa)
  *
  * These TYPE codes occupy the 0x20..0x3F band, which is UNUSED by fh_frame.h
  * (that file defines 0x01-0x03, 0x10-0x11, 0x7C-0x7F). No collision.
  *
  * Plain C, framework-agnostic, little-endian, packed — same rules as fh_frame.h
- * so the hub (ESP-IDF) and the ItsyBitsy (Arduino/SAMD) share ONE definition.
+ * so the hub (ESP-IDF) and the Pico (arduino-pico) share ONE definition.
  *
  * FLOW (all carried in fh_frame.h frames; this only defines TYPE + PAYLOAD):
- *   HUB --REQ--> ItsyBitsy      (a *_REQ TYPE with a request payload + seq)
- *   ItsyBitsy --RESP--> HUB     (the matching *_RESP TYPE, same seq, + status)
+ *   HUB --REQ--> Pico          (a *_REQ TYPE with a request payload + seq)
+ *   Pico --RESP--> HUB         (the matching *_RESP TYPE, same seq, + status)
  * Every request carries a `seq`; the response echoes it so the hub can match
  * reply to request and time out a radio that never answers.
  */
@@ -60,7 +61,7 @@ typedef enum {
 /* --------------------------------------------------------- status codes */
 typedef enum {
     FH_OD_OK          = 0x00,
-    FH_OD_BUSY        = 0x01,  /* another radio op in progress (single-core)   */
+    FH_OD_BUSY        = 0x01,  /* another radio op in progress (one-at-a-time) */
     FH_OD_NO_RESULT   = 0x02,  /* ran OK but found nothing (no tag, no frame)  */
     FH_OD_RADIO_FAIL  = 0x03,  /* the radio module did not respond / init fail */
     FH_OD_BAD_REQ     = 0x04,  /* malformed request payload                    */
@@ -175,14 +176,17 @@ typedef struct __attribute__((packed)) {
     uint8_t  listening;    /* current state after the change                   */
 } fh_od_lora_listen_resp_t;
 
-/* ---- single-core contract (documented so both ends agree) ------------------
- * The ItsyBitsy M0 is single-core: it services ONE radio action at a time.
- * If a REQ arrives while another op is running, it answers FH_OD_BUSY rather
- * than queueing deeply. The hub should serialize its prompts and wait for the
- * RESP (or a timeout) before issuing the next. A long LoRa TX (high SF) can
- * hold the node busy for up to ~1 s; the hub must tolerate that latency on the
- * other on-demand radios. None of these radios is a CONTINUOUS capture stream
- * (those live on the C5/S3/hub), so serialization is acceptable by design. */
+/* ---- one-at-a-time contract (documented so both ends agree) ----------------
+ * The Pico services ONE radio action at a time. If a REQ arrives while another
+ * op is running, it answers FH_OD_BUSY rather than queueing deeply. The hub
+ * should serialize its prompts and wait for the RESP (or a timeout) before
+ * issuing the next. A long LoRa TX (high SF) can hold the node busy for up to
+ * ~1 s; the hub must tolerate that latency on the other on-demand radios. None
+ * of these radios is a CONTINUOUS capture stream (those live on the C5/S3/hub),
+ * so serialization is acceptable by design. (The RP2040 is dual-core, so a
+ * future revision COULD service a long LoRa TX on core1 while core0 handles
+ * other radios — the one-at-a-time contract here is a simplicity choice, not a
+ * hardware limit, and both ends may keep assuming it.) */
 
 #ifdef __cplusplus
 }

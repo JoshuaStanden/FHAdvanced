@@ -1,67 +1,62 @@
 > ============================================================================
-> UPDATE 2026-10-20 (later same night) — THE HUB PIN DILEMMA BELOW IS RESOLVED
-> by a hardware REDESIGN. Read this banner first; the pin-crunch narrative below
-> is kept for history but is now MOOT (the hub no longer carries wired radios).
+> UPDATE 2026-10-20 (latest) — ON-DEMAND HOST IS NOW THE RASPBERRY PI PICO.
+> The on-demand radio node was briefly the ItsyBitsy M0, then switched to a
+> plain Raspberry Pi Pico (RP2040) after a compile test on the Pico passed with
+> far more headroom. The ItsyBitsy is RETIRED from the design. The history
+> below (which discusses the ItsyBitsy) is kept as a decision trail, but the
+> LIVE split is the Pico one in this banner — read this first.
 >
-> RESOLVED HARDWARE SPLIT (all on-demand radios on the ItsyBitsy M0):
+> WHY THE PICO (not the ItsyBitsy M0, not the Pico W):
+>   - Pico compile test PASSED (arduino-pico, RadioLib 7.8.1 + Adafruit PN532
+>     1.3.4 + BusIO 1.17.4): 4% flash (94.6 KB/2 MB), 4% RAM (11.4 KB/256 KB),
+>     250 KB RAM free. RadioLib has a native RP2040 HAL; all four radios linked.
+>   - vs the ItsyBitsy M0 (SAMD21, 32 KB RAM): the RP2040 has dual core, 264 KB
+>     RAM, 2 MB flash, and TWO hardware SPI buses — all headroom over the job.
+>   - vs the Pico W: the W's CYW43439 Wi-Fi/BLE is redundant here (2.4 Wi-Fi is
+>     the XIAO-S3's, BLE the Waveshare's) and eats GP23/24/25/29 + adds a 2.4 GHz
+>     antenna to a crowded layout. The plain (non-W) Pico is the right board.
+>   - The user has two plain Picos + two Pico Ws in hand; the plain Pico is used.
+>
+> RESOLVED HARDWARE SPLIT (all on-demand radios on the Raspberry Pi Pico):
 >   | Node            | Continuous                 | On-demand                          |
->   | XIAO-C5         | 5 GHz Wi-Fi + GPS          | —                                  |
+>   | XIAO-C5         | 5 GHz Wi-Fi ONLY           | —                                  |
 >   | XIAO-S3         | 2.4 GHz Wi-Fi ONLY         | —                                  |
->   | Hub (Waveshare) | BLE + SD + UI + aggregate  | —                                  |
->   | ItsyBitsy M0    | —                          | CC1101 + nRF24 + PN532 + SX1262 LoRa |
+>   | Hub (Waveshare) | BLE + GPS + SD + UI + aggr | —                                  |
+>   | Raspberry Pi Pico | —                        | CC1101 + nRF24 + PN532 + SX1262 LoRa |
 >
-> LoRa MOVED OFF the XIAO-S3 → onto the ItsyBitsy with the other on-demand radios
-> (LoRa-to-sensor-stick is on-demand, so it belongs with the on-demand node).
-> The XIAO-S3 is now a pure 2.4 GHz sniffer with plenty of spare GPIO.
+> The LoRa-to-sensor-stick link is on-demand, so it lives with the on-demand
+> node (the Pico). The XIAO-S3 is a pure 2.4 GHz sniffer with spare GPIO.
 >
-> COMPILE TEST PASSED (ItsyBitsy M0, Adafruit SAMD core 1.7.17):
->   - All four radio drivers link: RadioLib 7.8.1 (SX1262+CC1101+nRF24) +
->     Adafruit PN532 1.3.4 (+ BusIO 1.17.4). No errors.
->   - Flash: 69,200 bytes = 26% of 262,144. RAM: within the 32 KB region (link
->     succeeded with --check-sections; no RAM-overflow = static use fits).
->   - Proven STATIC fit; recheck `size` once real firmware logic adds buffers/stack.
+> CONSEQUENCES (unchanged by the board swap):
+>   - The hub carries NO wired radios. No I/O expander needed. The hub needs a
+>     UART link to the Pico (4 hub UARTs total: C5, S3, Pico, GPS).
+>   - fh_pins.h = LCD + SD + I2C + 4 UART links (DONE, firmware/src/fh_pins.h).
+>   - Build item: firmware-pico-rp2040/ (arduino-pico) — the on-demand radio
+>     node, speaks fh_protocol over UART. Compile test present + PASSED.
+>   - On-demand radios SERIALIZE one at a time (BUSY contract). Fine because none
+>     is continuous; the RP2040 is dual-core so parallelizing is a future option.
 >
-> CONSEQUENCES:
->   - The hub J8 pin crunch (entire "dilemma" below) DISSOLVES — the hub carries
->     NO wired radios now. No I/O expander needed. No camera sacrifice needed for
->     radios (camera-off was from the old plan; revisit whether it's still wanted).
->   - The hub still needs a UART link to the ItsyBitsy (now 3 daughterboard UARTs:
->     C5, S3, ItsyBitsy) — it has ample GPIO for that without radios on board.
->   - fh_pins.h rewrite is now MUCH simpler (hub = LCD + SD + I2C + 3 UART links).
->   - NEW build item: firmware-itsybitsy/ (Arduino/SAMD) — the on-demand radio
->     node, speaks the fh_protocol frame over UART. Compile test already pushed to
->     branch itsybitsy-ondemand.
->   - Still-open sub-decision: the ItsyBitsy is single-core — on-demand radios
->     SERIALIZE (one action at a time). Fine because none is continuous, but a long
->     LoRa transmit blocks a concurrent NFC/sub-GHz action. Acceptable per design.
+> GPS is on the Waveshare hub (off the XIAO-C5). C5 is a PURE 5 GHz sniffer.
+> NEO-6M is 1 Hz default / 5 Hz max; on foot 1 Hz already beats the ~3 m GPS
+> error floor, so which board stamps the fix is immaterial to real accuracy.
+> Hub owns one clean time/position source (with its PCF85063 RTC) feeding the
+> whole log via last-known-fix.
 >
-> UPDATE 2026-10-20 (continued):
->   - GPS MOVED to the Waveshare hub (off the XIAO-C5). C5 is now a PURE 5 GHz
->     sniffer. Rationale: NEO-6M is 1 Hz default / 5 Hz max; on foot 1 Hz already
->     beats the ~3 m GPS error floor, so which board stamps the fix is immaterial
->     to real accuracy. Hub owns one clean time/position source (pairs with its
->     battery-backed PCF85063 RTC) feeding the whole log via last-known-fix.
->     Tradeoff accepted: no source-exact geotag on the 5 GHz stream (negligible
->     vs the rate + error floor).
->   - CAMERA: briefly reinstated, then DROPPED AGAIN after a pin check (user,
->     2026-10-20). REASON: with GPS on the hub, the hub needs FOUR UART links
->     (C5 + S3 + ItsyBitsy + GPS = 8 pins). The camera claims 11 of the J8 pins
->     (IO17/18/21/38/39/40/42/45/46/47/48), leaving only ~3 free — not enough for
->     4 UARTs. Camera + 4 UARTs physically do NOT both fit on J8. Camera is a
->     nice-to-have the mission doesn't need; the 4 links are load-bearing, so the
->     camera stays OUT. (If a camera is ever wanted, it costs GPS-on-hub and/or a
->     daughterboard-over-I2C — revisit only if the mission adds a camera need.)
->   - HUB J8 FIT (VERIFIED, camera out): 4 UARTs = 8 pins. Free J8 native pool =
->     IO17,18,21,38,39,40,42,45,46,47,48 (11) + IO0* (strapping) + IO43/44.
->     8 needed vs 11 clean = ~3 spare, WITHOUT needing IO0, the SD-shared pins,
->     or moving the console off IO43/44. Hub is now comfortably within budget.
+> CAMERA: DROPPED. With GPS on the hub, the hub needs FOUR UART links (C5 + S3 +
+> Pico + GPS = 8 pins). The camera claims 11 J8 pins, leaving ~3 free — not
+> enough for 4 UARTs. Camera + 4 UARTs do NOT both fit on J8. The 4 links are
+> load-bearing; the camera stays OUT.
 >
-> CURRENT split (this is the live one):
->   | XIAO-C5         | 5 GHz Wi-Fi ONLY                                  |
->   | XIAO-S3         | 2.4 GHz Wi-Fi ONLY                                |
->   | Hub (Waveshare) | BLE + GPS + SD + UI + aggregate (NO camera)       |
->   | ItsyBitsy M0    | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)  |
->   Hub UART links: UART0/console stays; 4 data UARTs to C5, S3, ItsyBitsy, GPS.
+> HUB J8 FIT (VERIFIED, camera out): 4 UARTs = 8 pins. Free J8 native pool =
+> IO17,18,21,38,39,40,42,45,46,47,48 (11) + IO0* (strapping) + IO43/44.
+> 8 needed vs 11 clean = ~3 spare. Hub is comfortably within budget.
+>
+> ----------------------------------------------------------------------------
+> HISTORICAL NOTE (superseded, kept as the decision trail): the paragraphs
+> below predate the hardware redesign AND the ItsyBitsy→Pico switch. They
+> describe an earlier plan where the hub itself carried the wired radios and a
+> later one where the ItsyBitsy M0 hosted them. Both are MOOT now — the live
+> design is the Pico banner above. Read the narrative only for the reasoning.
 > ============================================================================
 
 # FHAdvanced — OPEN DECISIONS / where we stopped (2026-10-19 night)
