@@ -43,18 +43,25 @@
 >     battery-backed PCF85063 RTC) feeding the whole log via last-known-fix.
 >     Tradeoff accepted: no source-exact geotag on the 5 GHz stream (negligible
 >     vs the rate + error floor).
->   - CAMERA REINSTATED. It was dropped ONLY to free radio pins; the radios are
->     now on the ItsyBitsy, so the hub keeps the camera. (Verify the camera pins
->     don't clash with the hub's now-small GPIO needs: 3 UART links + GPS UART +
->     PN532-if-on-hub — but PN532 is on the ItsyBitsy, so the hub only needs the
->     3 daughterboard UARTs + GPS UART = 8 pins, easily within J8 even WITH the
->     camera using its pins. Confirm at fh_pins.h rewrite.)
+>   - CAMERA: briefly reinstated, then DROPPED AGAIN after a pin check (user,
+>     2026-10-20). REASON: with GPS on the hub, the hub needs FOUR UART links
+>     (C5 + S3 + ItsyBitsy + GPS = 8 pins). The camera claims 11 of the J8 pins
+>     (IO17/18/21/38/39/40/42/45/46/47/48), leaving only ~3 free — not enough for
+>     4 UARTs. Camera + 4 UARTs physically do NOT both fit on J8. Camera is a
+>     nice-to-have the mission doesn't need; the 4 links are load-bearing, so the
+>     camera stays OUT. (If a camera is ever wanted, it costs GPS-on-hub and/or a
+>     daughterboard-over-I2C — revisit only if the mission adds a camera need.)
+>   - HUB J8 FIT (VERIFIED, camera out): 4 UARTs = 8 pins. Free J8 native pool =
+>     IO17,18,21,38,39,40,42,45,46,47,48 (11) + IO0* (strapping) + IO43/44.
+>     8 needed vs 11 clean = ~3 spare, WITHOUT needing IO0, the SD-shared pins,
+>     or moving the console off IO43/44. Hub is now comfortably within budget.
 >
 > CURRENT split (this is the live one):
 >   | XIAO-C5         | 5 GHz Wi-Fi ONLY                                  |
 >   | XIAO-S3         | 2.4 GHz Wi-Fi ONLY                                |
->   | Hub (Waveshare) | BLE + GPS + camera + SD + UI + aggregate          |
+>   | Hub (Waveshare) | BLE + GPS + SD + UI + aggregate (NO camera)       |
 >   | ItsyBitsy M0    | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)  |
+>   Hub UART links: UART0/console stays; 4 data UARTs to C5, S3, ItsyBitsy, GPS.
 > ============================================================================
 
 # FHAdvanced — OPEN DECISIONS / where we stopped (2026-10-19 night)
