@@ -34,6 +34,27 @@
 >   - Still-open sub-decision: the ItsyBitsy is single-core — on-demand radios
 >     SERIALIZE (one action at a time). Fine because none is continuous, but a long
 >     LoRa transmit blocks a concurrent NFC/sub-GHz action. Acceptable per design.
+>
+> UPDATE 2026-10-20 (continued):
+>   - GPS MOVED to the Waveshare hub (off the XIAO-C5). C5 is now a PURE 5 GHz
+>     sniffer. Rationale: NEO-6M is 1 Hz default / 5 Hz max; on foot 1 Hz already
+>     beats the ~3 m GPS error floor, so which board stamps the fix is immaterial
+>     to real accuracy. Hub owns one clean time/position source (pairs with its
+>     battery-backed PCF85063 RTC) feeding the whole log via last-known-fix.
+>     Tradeoff accepted: no source-exact geotag on the 5 GHz stream (negligible
+>     vs the rate + error floor).
+>   - CAMERA REINSTATED. It was dropped ONLY to free radio pins; the radios are
+>     now on the ItsyBitsy, so the hub keeps the camera. (Verify the camera pins
+>     don't clash with the hub's now-small GPIO needs: 3 UART links + GPS UART +
+>     PN532-if-on-hub — but PN532 is on the ItsyBitsy, so the hub only needs the
+>     3 daughterboard UARTs + GPS UART = 8 pins, easily within J8 even WITH the
+>     camera using its pins. Confirm at fh_pins.h rewrite.)
+>
+> CURRENT split (this is the live one):
+>   | XIAO-C5         | 5 GHz Wi-Fi ONLY                                  |
+>   | XIAO-S3         | 2.4 GHz Wi-Fi ONLY                                |
+>   | Hub (Waveshare) | BLE + GPS + camera + SD + UI + aggregate          |
+>   | ItsyBitsy M0    | CC1101 + nRF24 + PN532 + SX1262 LoRa (on-demand)  |
 > ============================================================================
 
 # FHAdvanced — OPEN DECISIONS / where we stopped (2026-10-19 night)
