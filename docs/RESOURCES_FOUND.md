@@ -382,3 +382,60 @@ STATUS: camera-off decision locked. The exact GPIO-per-signal assignment is the
 fh_pins.h REWRITE — real design work, done deliberately (not bolted on). This is
 the last gather/plan step before the hub pin map can be rewritten and the hub
 firmware written. The design is confirmed BUILDABLE on the V2 board.
+
+---
+
+# ROUND 8 — CORRECTION: actual J8 2x16 header (user-supplied diagram)
+# Supersedes Round 7's "12 camera pins" pool — NOT all camera GPIOs are on the
+# header. This is the physical J8 connector, pin-numbered. AUTHORITATIVE.
+
+## J8 header (odd col | even col)
+ 1 VBUS        | 2  VBAT
+ 3 GND         | 4  GND
+ 5 U_N (IO19)  | 6  IO21
+ 7 U_P (IO20)  | 8  IO38
+ 9 ESP_SCLK'(IO11) | 10 IO39
+11 ESP_MOSI(IO10)  | 12 IO40
+13 ESP_MISO(IO9)   | 14 IO42
+15 IO17       | 16 IO45
+17 IO18       | 18 IO46
+19 IO0        | 20 IO47
+21 ESP_EN     | 22 IO48
+23 PWRON      | 24 ESP_TXD (IO43)
+25 ESP_SCL(IO7)   | 26 ESP_RXD (IO44)
+27 ESP_SDA(IO8)   | 28 GND
+29 GND        | 30 VCC3V3
+31 VCC3V3     | 32 VCC3V3
+
+## Usable-for-radio GPIO on the header (the REAL pool)
+Genuinely free native GPIO: IO17, IO18, IO0*, IO21, IO38, IO39, IO40, IO42,
+IO45, IO46, IO47, IO48, IO43**, IO44**  = 14 pins.
+  * IO0 is a STRAPPING pin (boot mode) — safe only as a boot-safe output/CS,
+    never a boot-blocking input.
+  ** IO43/IO44 are the UART0 CONSOLE — usable only if the console is moved to
+     USB-CDC (USB-Serial-JTAG).
+Shared-but-present: IO9/IO10/IO11 (pins 13/11/9) are the SPI nets BUT shared with
+the SD card (SDMMC). IO7/IO8 (pins 25/27) = shared I2C. USB IO19/IO20, ESP_EN,
+PWRON = not GPIO.
+
+## ★ CORRECTION to Round 7
+- IO41 is NOT on J8 (pin 12=IO40, pin 14=IO42 — 41 is skipped). Round 7's
+  12-pin "camera pool" over-counted by one and is superseded by this 14-pin
+  header-verified pool.
+
+## ★ ZERO-MARGIN REALITY
+Usable header GPIO = 14. Radio+UART demand = 14 (SPI3 bus 3 + CC1101 2 +
+nRF24 3 + PN532 2 + two UART links 4). EXACTLY 14 = 14 — NO spare — and only if:
+  (a) console -> USB-CDC to free IO43/IO44, AND
+  (b) IO0 (strapping) is used as a boot-safe CS, OR the radio SPI bus rides the
+      SHARED SD pins IO9/10/11 (accepting SD<->radio bus contention).
+Implication: three wired SPI radios + two UART daughterboard links sit right at
+the physical limit of J8. Options to buy margin (user/design decision):
+  - Put the radio SPI bus on the shared SD lines IO9/10/11 (one bus for SD+radios,
+    arbitrated by CS) → frees native pins but couples SD and radio timing.
+  - Drop one hub radio or move it to a daughterboard.
+  - Drop a radio IRQ to polled (throughput cost).
+  - Use TCA9554 EXIO0 (freed ex-CAM_PWDN) for one slow CS (expander-CS complexity).
+STATUS: the header is now exactly known. The fh_pins.h rewrite must fit within
+THIS 14-pin pool (not the Round-7 12-pin assumption). Design is buildable but
+tight — the margin tradeoff above is a real decision before/at the rewrite.
